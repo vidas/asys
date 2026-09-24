@@ -27,6 +27,20 @@ round. Consensus ends deliberation; after three negative assessments the
 princeps makes a separate final decision. Agreement is assessed, not counted
 as a deterministic vote.
 
+Each participant's `final` is their complete public contribution, saved verbatim
+in the shared discussion. Senators address one another with positions, supporting
+evidence, objections and replies. They exercise their own judgment, including
+reasoned dissent from the princeps or all other senators, and change position
+when persuaded. A completion notice or a link to a separate report does not
+replace the speech. The princeps assesses the arguments behind agreement and
+directs further discussion when the justification is missing.
+
+The discussion passes public contributions between participants; it does not
+automatically include their private deliberation or raw tool transcripts. Tool
+results relevant to an argument should be explained in the public speech, with
+evidence references as needed. Saved participant sessions and artifacts remain
+available for inspection; this distinction does not create filesystem isolation.
+
 The terminating princeps report supplies `final`, `exception` and task-defined
 fields. The controller adds `consensus`, `rounds` and `decision`. A decision
 without consensus can still be successful. Ask explicitly for fields such as
