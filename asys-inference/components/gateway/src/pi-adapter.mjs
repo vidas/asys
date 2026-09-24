@@ -1,5 +1,6 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 import { STATUS_CODES } from "node:http";
+import { isContextOverflow } from "@earendil-works/pi-ai/compat";
 import { createResourceExhaustedError } from "@cyclo/provider/errors";
 import { decodePayload, encodePayload } from "@cyclo/provider/protocol";
 
@@ -93,19 +94,27 @@ async function* dispatch(route, payload, signal, now) {
         response = { status: result.status, headers: result.headers };
         if (!result.body || !result.ok) return result;
         const reader = result.body.getReader();
+        let cancelled = false;
         const body = new ReadableStream({
           async pull(controller) {
+            let next;
             try {
-              const { done, value } = await reader.read();
-              if (done) { reader.releaseLock(); controller.close(); }
-              else controller.enqueue(value);
+              next = await reader.read();
             } catch (error) {
+              if (cancelled || dispatchSignal.aborted) return;
               const code = networkErrorCode(error);
               transportFailure = new GatewayTransientError(`Upstream stream interrupted${code ? ` (${code})` : ""}`);
               controller.error(error);
+              return;
             }
+            // Pi cancels its reader after a terminal provider error. That can
+            // resolve a pending read after this controller is already closed.
+            // Cleanup is not an upstream outage and must not replace the error.
+            if (cancelled) return;
+            if (next.done) { reader.releaseLock(); controller.close(); }
+            else controller.enqueue(next.value);
           },
-          cancel(reason) { return reader.cancel(reason); },
+          cancel(reason) { cancelled = true; return reader.cancel(reason); },
         });
         return new Response(body, result);
       } catch (error) {
@@ -141,6 +150,11 @@ async function* dispatch(route, payload, signal, now) {
       yield {
         payload: encoded,
         usage: eventUsage(event),
+        ...(event.type === "error" ? { failure: {
+          type: isContextOverflow(event.error, route.rawModel.contextWindow) ? "context_overflow" : "provider_error",
+          message: diagnosticText(event.error?.errorMessage || "Provider returned an error"),
+          ...(response?.status ? { http_status: response.status } : {}),
+        } } : {}),
       };
       if (terminal) return;
     }
@@ -162,6 +176,10 @@ async function* dispatch(route, payload, signal, now) {
   } finally {
     localAbort.abort(new Error("gateway native dispatch stopped"));
   }
+}
+
+function diagnosticText(value) {
+  return String(value).replace(/[\u0000-\u001f\u007f]/gu, " ").slice(0, 1024);
 }
 
 async function* nativeEvents(native, controller, signal) {

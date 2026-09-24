@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:http";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import * as zlib from "node:zlib";
 
@@ -12,7 +15,92 @@ import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.l
 import { resourceExhaustedRetryAt } from "@cyclo/provider/errors";
 
 import { createPiAdapter } from "../src/pi-adapter.mjs";
+import { createGatewayServices } from "../src/services.mjs";
+import { runTestAgent, model as testModel } from "../../../../asys-workers/test/helpers.mjs";
 import { streamProvider } from "../../../../asys-workers/src/provider-adapter.mjs";
+
+for (const close of [true, false]) {
+  test(`native context overflow survives stream cleanup (close=${close})`, async t => {
+    let calls = 0;
+    const upstream = createServer(async (request, response) => {
+      for await (const chunk of request) {}
+      calls++;
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      const error = { code: 'context_length_exceeded', message: 'Your input exceeds the context window of this model. Please adjust your input and try again.' };
+      response.write(`data: ${JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', ...error } })}\n\n`);
+      response.write(`data: ${JSON.stringify({ type: 'response.failed', response: { error } })}\n\n`);
+      if (close) response.end();
+    });
+    upstream.listen(0, '127.0.0.1');
+    await once(upstream, 'listening');
+    t.after(() => { upstream.closeAllConnections(); upstream.close(); });
+    const events = await inferWithAgent(
+      route(`http://127.0.0.1:${upstream.address().port}`, 'openai-codex-responses', codexToken()), t.signal,
+      { sleep: async () => assert.fail('context overflow must reach Pi instead of retrying transport') },
+    );
+    assert.equal(calls, 1);
+    assert.equal(events.at(-1).type, 'error');
+    assert.match(events.at(-1).error.errorMessage, /exceeds the context window/);
+  });
+}
+
+test('native overflow reaches Pi, compacts and resumes without replaying completed tools', { timeout: 15000 }, async t => {
+  const workspace = await mkdtemp(join(tmpdir(), 'asys-native-compaction-'));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  let calls = 0, tools = 0;
+  const audit = [], warnings = [], events = [];
+  const upstream = createServer(async (request, response) => {
+    for await (const chunk of request) {}
+    calls++;
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    if (calls === 2) {
+      const error = { code: 'context_length_exceeded', message: 'Your input exceeds the context window of this model. Please adjust your input and try again.' };
+      response.write(`data: ${JSON.stringify({ type: 'error', error })}\n\n`);
+      return; // Pi must cancel this stream after reading the semantic error.
+    }
+    let frames;
+    if (calls === 1) {
+      const item = { id: 'fc_test', type: 'function_call', call_id: 'call_test', name: 'produce_context', arguments: '{}', status: 'completed' };
+      const completed = nativeEvents().at(-1).response;
+      frames = [nativeEvents()[0],
+        { type: 'response.output_item.added', output_index: 0, item: { ...item, arguments: '' } },
+        { type: 'response.function_call_arguments.delta', output_index: 0, item_id: item.id, delta: '{}' },
+        { type: 'response.output_item.done', output_index: 0, item },
+        { type: 'response.completed', response: { ...completed, output: [item] } }];
+    } else {
+      const text = calls === 3 ? 'The completed tool produced context. Continue the remaining task.'
+        : JSON.stringify({ final: 'Finished after native compaction', exception: null });
+      frames = nativeEvents(text);
+    }
+    for (const frame of frames) response.write(`data: ${JSON.stringify(frame)}\n\n`);
+    response.end();
+  });
+  upstream.listen(0, '127.0.0.1'); await once(upstream, 'listening');
+  t.after(() => { upstream.closeAllConnections(); upstream.close(); });
+  const selected = route(`http://127.0.0.1:${upstream.address().port}`, 'openai-codex-responses', codexToken());
+  const publicModel = { ...testModel, id: 'work/gpt-test' };
+  const services = await createGatewayServices({
+    catalogue: { models: [publicModel], routes: { [publicModel.id]: { ...selected, account: 'work' } } },
+    audit: { async record(entry) { audit.push(entry); } }, warn(message) { warnings.push(message); },
+  });
+  const job = { id: 'native-recovery' };
+  const result = await runTestAgent({ config: { model: publicModel.id, prompt: 'Perform the task.', maxSteps: 8, options: {} },
+    job, workspace, signal: t.signal, provider: services.provider, save() {}, event(type, data) { events.push({ type, ...data }); },
+    customTools: [{ name: 'produce_context', label: 'Produce context', description: 'Test context producer', parameters: { type: 'object', properties: {} },
+      async execute() { tools++; return { content: [{ type: 'text', text: 'Test data '.repeat(12000) }] }; } }],
+  });
+  assert.equal(result.final, 'Finished after native compaction');
+  assert.equal(calls, 4);
+  assert.equal(tools, 1);
+  assert.equal(job.agent.session.entries.filter(e => e.type === 'compaction').length, 1);
+  assert.ok(events.some(e => e.type === 'agent.compaction_ended' && e.willRetry && !e.errorMessage));
+  const failure = audit.find(e => e.failure);
+  assert.equal(failure.outcome, 'provider_error');
+  assert.equal(failure.failure.type, 'context_overflow');
+  assert.equal(failure.failure.http_status, 200);
+  assert.match(warnings.join('\n'), /exceeds the context window/);
+  assert.equal(services.diagnostics.recentFailures()[0].failure.request_id, failure.failure.request_id);
+});
 
 test('the agent retries a native HTTP 502 without exposing the error page', async t => {
   const requests = [], delays = [];
@@ -338,7 +426,7 @@ function codexToken() {
   return `${header}.${payload}.signature`;
 }
 
-function nativeEvents() {
+function nativeEvents(text = "native ok") {
   const response = {
     id: "resp_test",
     object: "response",
@@ -359,12 +447,12 @@ function nativeEvents() {
     type: "message",
     role: "assistant",
     status: "completed",
-    content: [{ type: "output_text", text: "native ok", annotations: [] }],
+    content: [{ type: "output_text", text, annotations: [] }],
   };
   return [
     { type: "response.created", response },
     { type: "response.output_item.added", output_index: 0, item: { ...item, content: [] } },
-    { type: "response.output_text.delta", output_index: 0, item_id: item.id, delta: "native ok" },
+    { type: "response.output_text.delta", output_index: 0, item_id: item.id, delta: text },
     { type: "response.output_item.done", output_index: 0, item },
     { type: "response.completed", response: { ...response, output: [item] } },
   ];

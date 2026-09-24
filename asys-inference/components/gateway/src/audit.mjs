@@ -132,7 +132,7 @@ function repairIncompleteTail(descriptor, size) {
   ftruncateSync(descriptor, 0);
 }
 
-export function usageRecord({ model, started, outcome, usage }) {
+export function usageRecord({ model, started, outcome, usage, failure }) {
   return {
     timestamp: new Date().toISOString(),
     model,
@@ -142,6 +142,7 @@ export function usageRecord({ model, started, outcome, usage }) {
     output_tokens: safeNumber(usage?.outputTokens),
     cached_input_tokens: safeNumber(usage?.cachedInputTokens),
     reasoning_tokens: safeNumber(usage?.reasoningTokens),
+    ...(failure ? { failure } : {}),
   };
 }
 
@@ -278,7 +279,7 @@ function validateUsageRecord(record, line) {
   if (!record || typeof record !== "object" || Array.isArray(record)) {
     throw new Error(`usage audit record ${line} must be an object`);
   }
-  const keys = Object.keys(record).sort();
+  const keys = Object.keys(record).filter(key => key !== "failure").sort();
   const expected = [...USAGE_RECORD_FIELDS].sort();
   if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) {
     throw new Error(`usage audit record ${line} has an invalid schema`);
@@ -300,6 +301,15 @@ function validateUsageRecord(record, line) {
   for (const field of USAGE_RECORD_FIELDS.slice(3)) {
     if (!Number.isSafeInteger(record[field]) || record[field] < 0) {
       throw new Error(`usage audit record ${line} has an invalid ${field}`);
+    }
+  }
+  if (record.failure !== undefined) {
+    const f = record.failure;
+    if (!f || typeof f !== "object" || Array.isArray(f)
+        || Object.keys(f).some(key => !["request_id", "type", "message", "http_status"].includes(key))
+        || ["request_id", "type", "message"].some(key => typeof f[key] !== "string" || !SAFE_TEXT.test(f[key]) || f[key].length > 1024)
+        || (f.http_status !== undefined && (!Number.isInteger(f.http_status) || f.http_status < 100 || f.http_status > 599))) {
+      throw new Error(`usage audit record ${line} has an invalid failure`);
     }
   }
   const route = splitPublicModelId(record.model);

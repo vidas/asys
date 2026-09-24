@@ -134,6 +134,9 @@ export async function serveGatewayChannel(services, root, { signal, idleTimeoutM
 export async function gatewayCommand(services, command, body, context) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) invalid('Request body must be an object');
   switch (command) {
+    case 'status':
+      fields(body, []);
+      return services.status.getStatus({}, context);
     case 'models':
       fields(body, []);
       return providerCatalogueDocument(await services.provider.listModels({}, context));

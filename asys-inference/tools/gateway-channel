@@ -157,7 +157,7 @@ def request(root, command, body, *, api_key_env=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("root", type=Path)
-    parser.add_argument("command", choices=["providers", "models", "usage", "login", "logout", "rename"])
+    parser.add_argument("command", choices=["providers", "models", "usage", "status", "login", "logout", "rename"])
     parser.add_argument("body", type=json.loads)
     parser.add_argument("--api-key-env")
     args = parser.parse_args()

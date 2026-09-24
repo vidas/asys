@@ -35,6 +35,7 @@ type Observation struct {
 	ConfiguredEndpoint string                 `json:"configured_endpoint"`
 	Global             composition.Global     `json:"global"`
 	Components         []ComponentObservation `json:"components"`
+	Gateways           []GatewayStatus        `json:"gateways,omitempty"`
 	Operation          string                 `json:"operation,omitempty"`
 	Phase              string                 `json:"phase,omitempty"`
 }
@@ -108,6 +109,7 @@ func (cli CLI) status(ctx context.Context, runtime *Runtime, document *Document,
 		return err
 	}
 	result := Observe(document, status)
+	result.Gateways = cli.gatewayStatuses(ctx, runtime, document)
 	if *jsonOutput {
 		if err = writeJSON(cli.Out, result); err != nil {
 			return err
@@ -142,6 +144,11 @@ func (cli CLI) status(ctx context.Context, runtime *Runtime, document *Document,
 			fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\n", c.Name, c.Source, c.Component, c.State, c.Health, detail)
 		}
 		if err := writer.Flush(); err != nil {
+			return err
+		}
+	}
+	if !*jsonOutput {
+		if err := printGatewayStatuses(cli.Out, result.Gateways); err != nil {
 			return err
 		}
 	}

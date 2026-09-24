@@ -19,6 +19,20 @@ import {
   usageRecord,
 } from "../src/audit.mjs";
 
+test('old usage records and new failure diagnostics aggregate together', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'cyclo-audit-diagnostics-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, 'usage.jsonl');
+  const audit = createUsageAudit(path);
+  await audit.record(usageRecord({ model: 'work/model', started: Date.now(), outcome: 'ok' }));
+  const failure = { request_id: 'request-123', type: 'context_overflow', message: 'Input exceeds the context window', http_status: 200 };
+  await audit.record(usageRecord({ model: 'work/model', started: Date.now(), outcome: 'provider_error', failure }));
+  const report = await aggregateUsageFile(path);
+  assert.equal(report.totals.requests, 2);
+  assert.equal(report.totals.outcomes.provider_error, 1);
+  assert.deepEqual(JSON.parse((await readFile(path, 'utf8')).trim().split('\n')[1]).failure, failure);
+});
+
 test("usage records contain only observable request, outcome, and token data", () => {
   const record = usageRecord({
     model: "work/gpt-test",

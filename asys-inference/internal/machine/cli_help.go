@@ -27,7 +27,7 @@ Example: asys-inference add cache passthrough -L upstream=gateway.provider
 		"select":     "select NAME[.OUTPUT]|-\n\nExport this provider output as @inference_endpoint. Use - to unbind it.\n",
 		"components": "components [--json] [--components-root DIRECTORY]\n\nList available component sources and interfaces. Does not create or change state.\n",
 		"show":       "show [--json]\n\nRead saved provider configuration and the selected endpoint. Does not apply changes.\n",
-		"status":     "status [--json]\n\nInspect provider health and the active endpoint. Does not apply changes.\n",
+		"status":     "status [--json]\n\nInspect provider health, the active endpoint and recent failures. Does not apply changes.\n",
 		"models":     "models [--json]\n\nQuery model IDs exported by @inference_endpoint. --json includes model metadata.\n",
 		"gateway": `gateway [--name NAME] COMMAND
 

@@ -77,6 +77,17 @@ test('the real Python host client completes native Pi API-key login without atta
   for (const event of await new Reader(f.input.directory).read(0)) assert.doesNotMatch(JSON.stringify(event), /private-test-key/);
 });
 
+test('the real Python host client reads gateway failure status', async t => {
+  const f = await fixture(t);
+  const child = spawn('python3', [helper, f.root, 'status', '{}'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '', err = '';
+  child.stdout.on('data', value => { out += value; });
+  child.stderr.on('data', value => { err += value; });
+  const code = await new Promise((resolve, reject) => { child.on('error', reject); child.on('close', resolve); });
+  assert.equal(code, 0, err);
+  assert.deepEqual(JSON.parse(out), { recent_failures: [] });
+});
+
 test('OAuth URLs, selections, and manual codes round-trip through correlated events', async t => {
   const f = await fixture(t, async interaction => {
     interaction.notify({ type: 'auth_url', url: 'https://example.invalid/authorize', instructions: 'Authorize here' });

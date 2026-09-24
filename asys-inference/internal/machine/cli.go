@@ -33,7 +33,7 @@ Default: ASYS_STATE_ROOT, then XDG_STATE_HOME/asys, then ~/.local/state/asys.
   select NAME[.OUTPUT]|-             Choose the output exported as @inference_endpoint
   components [--json] [--components-root DIR]  List available component sources
   show [--json]                     Show configured providers and selected output
-  status [--json]                   Show provider health and the active endpoint
+  status [--json]                   Show provider health and recent failures
   models [--json]                   List models exported by @inference_endpoint
   gateway [--name NAME] COMMAND      providers, models, usage, login, logout, rename
   version

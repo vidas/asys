@@ -1,4 +1,5 @@
 import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
 
 import { Code, ConnectError } from "@connectrpc/connect";
 import { HealthStatus } from "@cyclo/component/contract";
@@ -103,21 +104,33 @@ export async function createGatewayServices(options = {}) {
     }
   }
 
+  const recentFailures = new Map();
+
   async function* inferRoute(request, route, context) {
     const started = Date.now();
 
     let usage;
     let failure;
+    let diagnostic;
+    const requestId = randomUUID();
     let pendingResponse;
     let auditAttempted = false;
     const writeOutcome = async (outcome) => {
       auditAttempted = true;
-      await record(audit, usageRecord({
+      const entry = usageRecord({
         model: request.model,
         started,
         outcome,
         usage,
-      }));
+        failure: diagnostic ? { request_id: requestId, ...diagnostic } : undefined,
+      });
+      await record(audit, entry);
+      if (diagnostic) {
+        recentFailures.delete(request.model);
+        recentFailures.set(request.model, entry);
+        if (recentFailures.size > 100) recentFailures.delete(recentFailures.keys().next().value);
+        warn(JSON.stringify({ event: "inference_failed", ...entry }));
+      }
     };
 
     try {
@@ -128,6 +141,7 @@ export async function createGatewayServices(options = {}) {
           context.signal,
         )) {
           if (response.usage !== undefined) usage = response.usage;
+          if (response.failure !== undefined) diagnostic = response.failure;
           if (pendingResponse !== undefined) {
             yield { payload: pendingResponse.payload };
           }
@@ -135,6 +149,12 @@ export async function createGatewayServices(options = {}) {
         }
       } catch (error) {
         failure = error;
+        diagnostic = {
+          type: error instanceof GatewayCredentialError ? "credential_unavailable"
+            : error instanceof ConnectError ? `rpc_${error.code}` : "internal",
+          message: error instanceof ConnectError ? error.rawMessage.replace(/[\u0000-\u001f\u007f]/gu, " ").slice(0, 1024)
+            : error instanceof GatewayCredentialError ? "Gateway credential unavailable" : "Gateway inference failed",
+        };
       }
 
       await writeOutcome(
@@ -144,7 +164,7 @@ export async function createGatewayServices(options = {}) {
             ? `rpc_${failure.code}`
             : failure
               ? "internal"
-              : "ok",
+              : diagnostic ? "provider_error" : "ok",
       );
       if (failure instanceof GatewayCredentialError) {
         throw new ConnectError("gateway credential unavailable", Code.FailedPrecondition);
@@ -162,6 +182,11 @@ export async function createGatewayServices(options = {}) {
   }
 
   return Object.freeze({
+    status: Object.freeze({
+      async getStatus() {
+        return { recent_failures: [...recentFailures.values()] };
+      },
+    }),
     component: Object.freeze({
       health() {
         try {
@@ -181,6 +206,8 @@ export async function createGatewayServices(options = {}) {
         return { providers: discoverSupportedProviders({ providers }) };
       },
     }),
+
+    diagnostics: Object.freeze({ recentFailures: () => [...recentFailures.values()] }),
 
     usage: Object.freeze({
       async getUsage() {

@@ -59,13 +59,17 @@ request carry it.
 | `error` | `message`: failure description |
 | `alive` | None; acknowledge client keepalive |
 
-Commands are `providers`, `models`, and `usage` with an empty body; `logout`
+Commands are `providers`, `models`, `usage`, and `status` with an empty body; `logout`
 with `account`; `rename` with `account` and `new_account`; and `login` with
 the body shown above. Login authentication is `auto`, `oauth`, or `api_key`.
 An optional `api_key_input: true` indicates that the host is supplying a key;
 ambient-only authentication must reject that request instead of ignoring it.
 The login result contains `account` and the selected `authentication`.
-`models` returns this gateway's catalogue.
+`models` returns this gateway's catalogue. `status` returns `recent_failures`
+with the latest inference failure per model since startup. Each record includes
+its timestamp, model, outcome and a bounded failure diagnostic. It reads retained
+local observations without querying upstream providers. The host's
+`asys-inference status [--json]` consumes this operation.
 
 Pi's interaction callbacks publish notices and prompts. Answers must match
 both the request and prompt IDs. OAuth selections are displayed as numbered

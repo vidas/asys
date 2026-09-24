@@ -88,7 +88,7 @@ while the previous working output continues serving.
 | --- | --- |
 | `components [--json]` | Available sources and interfaces |
 | `show [--json]` | Saved desired configuration |
-| `status [--json]` | Actual provider health and selected endpoint |
+| `status [--json]` | Provider health, selected endpoint and recent failures |
 | `models [--json]` | Live exported model catalogue |
 | `start` | Build/apply the saved network and current images |
 | `select NAME[.OUTPUT]` | Switch the exported provider |
@@ -105,6 +105,17 @@ route changes; new connections resolve the new symbolic target.
 source failures, then run `start` to retry. Status exits nonzero when its requested
 endpoint is nonoperational while still printing diagnostics. Do not infer model
 authentication success merely from a healthy container.
+
+`gateway usage` reports request and token accounting.
+
+Inference failures emit structured `inference_failed` records in gateway container
+logs and persist a bounded diagnostic in the private `usage.jsonl` audit. Records
+include the model, request ID, error category, sanitized message and upstream HTTP
+status when known; prompts and successful model output are not logged. Native
+provider error events are counted as `provider_error`, rather than successful
+requests. Status includes the latest failure per model since gateway startup
+(up to 100 models), with its timestamp; this is historical evidence, not a claim
+that the latest request is still failing.
 
 Independent consumers declare a Provider input and link to `@inference_endpoint`
 in the same system. Use `dcomp dashboard SYSTEM` to inspect component wiring;
