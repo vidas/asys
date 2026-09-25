@@ -312,9 +312,10 @@ test('the Provider RPC iterator is released when its terminal Pi event arrives',
   assert.equal(closed, true);
 });
 
-test('an exhausted Provider is replayed after its reset time, even hours later', async () => {
+for (const [resetAfterMs, expectedDelayMs] of [[500, 1000], [60_000, 60_000], [3 * 60 * 60 * 1000, 600_000]]) {
+test(`provider reset in ${resetAfterMs} ms is rechecked after ${expectedDelayMs} ms`, async () => {
   const route = groupModels([model]).get('fixture')[0];
-  const start = 1_700_000_000_000, resetAfterMs = 3 * 60 * 60 * 1000;
+  const start = 1_700_000_000_000;
   let clock = start, calls = 0;
   const sleeps = [], waits = [];
   const provider = { async *infer(_request, { signal }) {
@@ -330,13 +331,14 @@ test('an exhausted Provider is replayed after its reset time, even hours later',
   const result = await stream.result();
   assert.equal(result.stopReason, 'stop');
   assert.equal(calls, 2);
-  assert.deepEqual(sleeps, [resetAfterMs]);
+  assert.deepEqual(sleeps, [expectedDelayMs]);
   assert.equal(waits.length, 1);
-  assert.equal(waits[0].retryAt.getTime(), start + resetAfterMs);
-  assert.equal(waits[0].delayMs, resetAfterMs);
+  assert.equal(waits[0].retryAt.getTime(), start + expectedDelayMs);
+  assert.equal(waits[0].delayMs, expectedDelayMs);
 });
+}
 
-test('an exhaustion wait ends only on operator cancellation and reports as aborted', async () => {
+test('cancelling the default exhaustion wait aborts before another request', async () => {
   const route = groupModels([model]).get('fixture')[0];
   const controller = new AbortController();
   let calls = 0;
@@ -346,7 +348,7 @@ test('an exhaustion wait ends only on operator cancellation and reports as abort
   } };
   const stream = streamProvider(provider, model.id, route.model, { messages: [] },
     { signal: controller.signal }, {
-      async sleep(_delayMs, signal) { controller.abort(); signal.throwIfAborted(); },
+      onExhaustion() { queueMicrotask(() => controller.abort()); },
     });
   const result = await stream.result();
   assert.equal(result.stopReason, 'aborted');
@@ -512,7 +514,7 @@ test('partial output followed by repeated capacity limits waits outside cancelle
   const events = [];
   for await (const event of stream) events.push(event);
   assert.deepEqual(events.map(event => event.type), ['start', 'done']);
-  assert.deepEqual(delays, [18_000_000, 18_000_000]);
+  assert.deepEqual(delays, [600_000, 600_000]);
   assert.equal(waits.length, 2);
   assert.equal(calls, 3);
 });

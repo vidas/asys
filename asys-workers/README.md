@@ -69,8 +69,10 @@ Inference uses the existing `cyclo.provider.v1.Provider` interface. The adapter
 owns retries, preserving partial messages and completed tools while refusing to
 execute unfinished tool calls. Its default inactivity timeout is 600000 ms,
 configurable with `ASYS_INFERENCE_IDLE_TIMEOUT_MS`. Progress refreshes the timer;
-it is not a total job deadline. Retry backoff is capped at 30 seconds and waits
-respect capacity reset information. Cancellation interrupts calls and waits.
+it is not a total job deadline. Transient retry backoff is capped at 30 seconds.
+Capacity waits follow the provider's retry time but are capped at ten minutes,
+so recovered capacity is rechecked even when a later reset was reported.
+Cancellation interrupts calls and waits.
 Pi's separate transport retry loop is disabled. `maxSteps` counts logical
 inference calls, including compaction, rather than transport retries.
 

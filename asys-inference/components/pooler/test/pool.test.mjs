@@ -47,6 +47,36 @@ test("concurrent exhaustion observations retain the later safe deadline", () => 
   assert.equal(pool.begin().next(6_000).memberModelId, "two");
 });
 
+test("long exhaustion cooldowns recheck members every ten minutes", () => {
+  const start = 1_700_000_000_000;
+  let now = start;
+  const pool = new PoolScheduler(["one", "two"], { now: () => now });
+  for (let round = 0; round < 2; round++) {
+    const attempt = pool.begin();
+    assert.equal(attempt.next().memberModelId, "one");
+    attempt.markExhausted(new Date(start + 3 * 24 * 60 * 60_000));
+    assert.equal(attempt.next().memberModelId, "two");
+    attempt.markExhausted(new Date(start + 4 * 24 * 60 * 60_000));
+    assert.equal(attempt.next().retryAt.getTime(), now + 600_000);
+    assert.equal(pool.begin().next(now + 599_999).retryAt.getTime(), now + 600_000);
+    now += 600_000;
+  }
+  assert.equal(pool.begin().next().memberModelId, "one");
+});
+
+test("short provider cooldowns expire before the ten-minute cap", () => {
+  let now = 1_700_000_000_000;
+  const pool = new PoolScheduler(["one", "two"], { now: () => now });
+  const attempt = pool.begin();
+  assert.equal(attempt.next().memberModelId, "one");
+  attempt.markExhausted(new Date(now + 60_000));
+  assert.equal(attempt.next().memberModelId, "two");
+  attempt.markExhausted(new Date(now + 120_000));
+  assert.equal(attempt.next().retryAt.getTime(), now + 60_000);
+  now += 60_000;
+  assert.equal(pool.begin().next().memberModelId, "one");
+});
+
 test("scheduler validates configuration and attempt sequencing", () => {
   assert.throws(() => new PoolScheduler([]), /at least two/u);
   assert.throws(() => new PoolScheduler(["one", "one"]), /distinct/u);

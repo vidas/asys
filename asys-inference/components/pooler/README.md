@@ -58,7 +58,10 @@ The pooler retries another member only after typed resource exhaustion arrives
 before the first response. It never replays a request after emitting output.
 Malformed exhaustion details and all other errors are propagated unchanged. If
 every member is cooling down, the pooler returns typed exhaustion with the
-earliest retry time; it does not sleep.
+earliest retry time; it does not sleep. Each exhaustion cooldown is capped at
+ten minutes, even when the upstream reset date is later. After that deadline,
+the member is eligible for a new request; another exhaustion response starts
+another bounded cooldown. Earlier upstream retry times are preserved.
 
 Inference payloads remain opaque. The component changes only the model ID on a
 pooled upstream request. Cooldowns are held in memory and are reconstructed

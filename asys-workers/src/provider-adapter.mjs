@@ -17,6 +17,7 @@ const ZERO_COST = Object.freeze({ input: 0, output: 0, cacheRead: 0, cacheWrite:
 const MAX_SAFE_UINT64 = BigInt(Number.MAX_SAFE_INTEGER);
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const MIN_EXHAUSTION_RETRY_DELAY_MS = 1_000;
+const MAX_EXHAUSTION_RETRY_DELAY_MS = 10 * 60_000;
 const RETRYABLE_RPC_CODES = new Set([Code.Unavailable, Code.DeadlineExceeded, Code.Aborted, Code.Canceled]);
 const NETWORK_ERRORS = new Set([
   "ECONNRESET", "ECONNREFUSED", "ECONNABORTED", "EPIPE", "ETIMEDOUT", "EAI_AGAIN", "ENOTFOUND",
@@ -130,7 +131,8 @@ async function pump(output, client, publicId, model, context, options, { now, sl
         if (!exhausted && !retryableTransportError(error)) throw error;
         const delayMs = retryAt === undefined
           ? Math.round(Math.min(30_000, 1000 * 2 ** Math.min(retry, 5)) * (0.5 + random() * 0.5))
-          : Math.max(MIN_EXHAUSTION_RETRY_DELAY_MS, retryAt.getTime() - now());
+          : Math.min(MAX_EXHAUSTION_RETRY_DELAY_MS,
+            Math.max(MIN_EXHAUSTION_RETRY_DELAY_MS, retryAt.getTime() - now()));
         const detail = { attempt: retry + 1, delayMs, errorMessage: providerErrorMessage(error),
           outputStarted: emitted, idleTimeoutMs, retryAt: new Date(now() + delayMs) };
         if (exhausted) onExhaustion(detail);
@@ -223,13 +225,8 @@ export function toProviderMessage(message) {
   return { ...native, api: asysNativeIdentity.api, provider: asysNativeIdentity.provider, model: asysNativeIdentity.model };
 }
 
-async function abortableSleep(delayMs, signal) {
-  let remaining = delayMs;
-  while (remaining > 0) {
-    const chunk = Math.min(remaining, MAX_TIMER_DELAY_MS);
-    await delay(chunk, undefined, { signal });
-    remaining -= chunk;
-  }
+function abortableSleep(delayMs, signal) {
+  return delay(delayMs, undefined, { signal });
 }
 
 // These values control the local process or the credential boundary; they are

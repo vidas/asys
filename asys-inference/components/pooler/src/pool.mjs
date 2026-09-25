@@ -1,3 +1,5 @@
+const MAX_EXHAUSTION_COOLDOWN_MS = 10 * 60_000;
+
 function memberIds(value) {
   if (
     !Array.isArray(value)
@@ -112,7 +114,8 @@ export class PoolScheduler {
   }
 
   cool(member, retryAtMs) {
-    this.cooldowns.set(member, Math.max(this.cooldowns.get(member), retryAtMs));
+    const recheckAt = Math.min(retryAtMs, this.now() + MAX_EXHAUSTION_COOLDOWN_MS);
+    this.cooldowns.set(member, Math.max(this.cooldowns.get(member), recheckAt));
   }
 
   earliestRetry(eligibleMembers, attempted) {
