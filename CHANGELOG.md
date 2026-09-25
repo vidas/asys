@@ -1,5 +1,11 @@
 # Release notes
 
+## Unreleased
+
+- Require dcomp 0.3.2 or newer for its disconnected pending-connection fix.
+  Pin the inference Go dependency to v0.3.2 and remove the copied Go source
+  override so builds use the published module.
+
 ## 0.2.0
 
 - Unify execution under `asys-run ENVIRONMENT WORKER|WORKFLOW.bpmn` and

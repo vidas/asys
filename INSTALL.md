@@ -3,10 +3,15 @@
 ## Requirements
 
 Use Linux, GNU Make, Python 3.10+, Go 1.25+ for the inference build, and a local
-Docker Engine accessible to the invoking user. Install dcomp 0.3.1+ separately;
+Docker Engine accessible to the invoking user. Install dcomp 0.3.2+ separately;
 `dcomp` and `dcomp-proxy` must be on PATH (or use their documented binary overrides).
 Host Node is unnecessary for ordinary execution; container builds install worker
 dependencies. Development tests need Node 22.19+, npm and Python jsonschema.
+
+The inference build pins the dcomp Go module to v0.3.2; Go downloads and verifies
+it using `go.mod` and `go.sum`. The host executables are installed separately.
+When upgrading dcomp, follow its [proxy upgrade procedure](https://github.com/glguida/dcomp/blob/v0.3.2/README.md#upgrade-from-031-to-032):
+the fix requires replacing the running proxy; `asys update` alone leaves it running.
 
 ```sh
 dcomp version

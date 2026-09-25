@@ -41,7 +41,7 @@ func NewRuntime(store Store, config Config, report io.Writer) (*Runtime, error) 
 		if installed, err := exec.LookPath("dcomp-proxy"); err == nil {
 			manager.Binary, _ = filepath.Abs(installed)
 		} else {
-			return nil, fmt.Errorf("dcomp-proxy is required; install dcomp 0.3.1 or set DCOMP_PROXY_BINARY: %w", err)
+			return nil, fmt.Errorf("dcomp-proxy is required; install dcomp 0.3.2 or set DCOMP_PROXY_BINARY: %w", err)
 		}
 	}
 	controller := &lifecycle.Controller{Engine: docker, Proxy: manager, State: state.Store{Root: config.DCompRoot}, RuntimeRoot: config.RuntimeRoot,

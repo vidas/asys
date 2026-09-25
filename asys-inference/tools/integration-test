@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real dcomp 0.3.1 and providers; no credentials or paid inference."""
+"""Real dcomp 0.3.2 and providers; no credentials or paid inference."""
 import concurrent.futures
 import json
 import os
@@ -28,8 +28,8 @@ def main():
         machine_cli = [str(prefix / 'bin/asys-inference'), '--root', str(system_root)]
         dcomp = [os.environ.get('DCOMP_BINARY', 'dcomp'), '--state-root', str(droot)]
         version = subprocess.check_output(dcomp[:1] + ['version'], text=True).strip()
-        if version != 'dcomp 0.3.1':
-            raise RuntimeError(f'Docker acceptance requires dcomp 0.3.1, got {version}')
+        if version != 'dcomp 0.3.2':
+            raise RuntimeError(f'Docker acceptance requires dcomp 0.3.2, got {version}')
         env = dict(os.environ, DOCKER_HOST=os.environ.get('DOCKER_HOST', 'unix:///var/run/docker.sock'))
         tags = []
         volume = None

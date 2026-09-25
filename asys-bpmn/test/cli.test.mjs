@@ -97,11 +97,11 @@ test('Ctrl-C while waiting for stdin exits without creating components or run st
   await assert.rejects(readFile(join(root, 'runs')), { code: 'ENOENT' });
 });
 
-test('dcomp without container user support is rejected before starting components', { timeout: 10000 }, async t => {
+test('dcomp 0.3.1 is rejected before starting components', { timeout: 10000 }, async t => {
   const root = await mkdtemp(join(tmpdir(), 'workflow-cli-version-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const dcomp = join(root, 'dcomp');
-  await writeFile(dcomp, '#!/usr/bin/env python3\nimport sys\nassert sys.argv[1:] == ["version", "--json"]\nprint(\'{"version":"0.3.0","api_version":2}\')\n', { mode: 0o755 });
+  await writeFile(dcomp, '#!/usr/bin/env python3\nimport sys\nassert sys.argv[1:] == ["version", "--json"]\nprint(\'{"version":"0.3.1","api_version":2}\')\n', { mode: 0o755 });
   const child = spawn('python3', [cli, environment, workflow, '--root', root], {
     env: { ...process.env, DCOMP_BINARY: dcomp },
   });
@@ -109,7 +109,7 @@ test('dcomp without container user support is rejected before starting component
   child.stderr.on('data', chunk => { error += chunk; });
   const [code] = await once(child, 'close');
   assert.equal(code, 1, error);
-  assert.match(error, /Requires dcomp 0\.3/);
+  assert.match(error, /Requires dcomp 0\.3\.2\+/);
 });
 
 test('the launcher gives both components fixed queue, job and workspace mounts through dcomp', async () => {

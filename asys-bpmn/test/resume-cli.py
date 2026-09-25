@@ -58,7 +58,7 @@ class Resume(unittest.TestCase):
     def command(self, command, **kwargs):
         self.commands.append(command)
         if command[-2:] == ["version", "--json"]:
-            return json.dumps({"api_version": 2, "version": "0.3.1"})
+            return json.dumps({"api_version": 2, "version": "0.3.2"})
         if command[:3] == ["docker", "build", "--iidfile"]:
             Path(command[3]).write_text("sha256:updated-workers")
             return ""
@@ -309,7 +309,7 @@ class Resume(unittest.TestCase):
 
         def build(command, **kwargs):
             if command[-2:] == ["version", "--json"]:
-                return json.dumps({"api_version": 2, "version": "0.3.1"})
+                return json.dumps({"api_version": 2, "version": "0.3.2"})
             self.assertEqual(command[:3], ["docker", "build", "--iidfile"])
             self.assertEqual(command[-1], str(source))
             self.assertEqual(manifest.read_text(), "docker sha256:saved-workers\n")

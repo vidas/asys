@@ -200,7 +200,7 @@ func (cli CLI) run(ctx context.Context, args []string) error {
 		if len(args) != 0 {
 			return usage("version takes no arguments")
 		}
-		fmt.Fprintf(cli.Out, "asys-inference %s (dcomp 0.3.1; %s)\n", Version, Service)
+		fmt.Fprintf(cli.Out, "asys-inference %s (dcomp 0.3.2; %s)\n", Version, Service)
 		return nil
 	}
 	if command == "help" {

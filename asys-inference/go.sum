@@ -1,2 +1,4 @@
+github.com/glguida/dcomp v0.3.2 h1:zGRehGbEUQBZ0fklvV7Q70lbqlHl/Z2ni6GivELnzK8=
+github.com/glguida/dcomp v0.3.2/go.mod h1:Vy4Cppwrt4ZeBmsn8s/1yY+J/nJ6WwqWEFdSqwacFqI=
 golang.org/x/sys v0.43.0 h1:Rlag2XtaFTxp19wS8MXlJwTvoh8ArU6ezoyFsMyCTNI=
 golang.org/x/sys v0.43.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=

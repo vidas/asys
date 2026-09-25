@@ -63,7 +63,7 @@ def main():
 
         try:
             version = json.loads(run(dcomp[:1], "version", "--json"))
-            assert version['api_version'] == 2 and tuple(map(int, version['version'].split('.'))) >= (0, 3, 1), "requires dcomp 0.3.1+"
+            assert version['api_version'] == 2 and tuple(map(int, version['version'].split('.'))) >= (0, 3, 2), "requires dcomp 0.3.2+"
             print(run(["docker"], "run", "--rm", "--network", "none", "--user", "0:0",
                       "--mount", f"type=bind,source={WORKSPACE},target=/opt/asys,readonly",
                       "--entrypoint", "python3", BPMN_IMAGE,

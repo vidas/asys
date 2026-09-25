@@ -38,7 +38,7 @@ class LocalRun(Run):
             return 'sha256:fixture'
         operation = command[len(self.dcomp)] if command[:len(self.dcomp)] == self.dcomp else command[1]
         if operation == 'version':
-            return json.dumps({'api_version': 2, 'version': '0.3.1'})
+            return json.dumps({'api_version': 2, 'version': '0.3.2'})
         if operation == 'add-component':
             self.launch_arguments = command
             self.child = subprocess.Popen([sys.executable, '-c', '''

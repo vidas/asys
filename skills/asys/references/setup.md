@@ -3,7 +3,7 @@
 ## Install
 
 The host needs Linux, Python 3.10+, a local Docker Engine and CLI, and separately
-installed dcomp 0.3.1+ with Machine API 2. Building inference needs Go 1.25+.
+installed dcomp 0.3.2+ with Machine API 2. Building inference needs Go 1.25+.
 The Human terminal installs pinned dependencies in a private environment;
 worker dependencies are built into images.
 

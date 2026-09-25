@@ -101,8 +101,8 @@ class EnvironmentHost(ComponentHost):
             environment, config, getattr(self, 'worker_definition', None), getattr(self.args, 'worker', None))}
         version = json.loads(self.command([self.dcomp[0], 'version', '--json']))
         release = re.fullmatch(r'(\d+)\.(\d+)\.(\d+)(?:[-+].*)?', version.get('version', ''))
-        if version.get('api_version') != 2 or not release or tuple(map(int, release.groups())) < (0, 3, 1):
-            raise LaunchError(f'Requires dcomp 0.3.1 (Machine API 2); {self.dcomp[0]} reports {version}')
+        if version.get('api_version') != 2 or not release or tuple(map(int, release.groups())) < (0, 3, 2):
+            raise LaunchError(f'Requires dcomp 0.3.2+ (Machine API 2); {self.dcomp[0]} reports {version}')
         manifest = self.directory / 'environment/component.dcomp'
         with tempfile.TemporaryDirectory(prefix='preview-', dir=self.directory) as temporary:
             preview = Path(temporary)
