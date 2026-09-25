@@ -146,7 +146,7 @@ class TranscriptTest(unittest.TestCase):
              "content": json.dumps({"final": "Checks complete.\nReady for review.", "exception": None, "goal_status": "review"})}},
         ]}}
         (phase / "agent.json").write_text(json.dumps({"agent": agent}))
-        for version in (1, 2, 3):
+        for version in (1, 2, 3, 4):
             with self.subTest(version=version):
                 (self.root / "goal.json").write_text(json.dumps({"version": version, "goal": "Check board",
                     "status": "running", "sessions": [{"attempt": 2, "phase": "implement", "status": "completed",

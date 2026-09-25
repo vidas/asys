@@ -1,6 +1,6 @@
 # Goal loop design
 
-Decision recorded 2026-09-21.
+Decision recorded 2026-09-21; review handoff revised 2026-09-25.
 
 ## Execution policy
 
@@ -12,12 +12,26 @@ may contain many edits, checks and corrections. It need not represent a fixed
 sprint or a single checklist item.
 
 The verifier receives the original request, governing sources, current
-workspace, open findings and human guidance, without the implementer's
-completion narrative. Findings return to the continuing implementer. Only
-independent verification can complete the whole goal. Preserve open findings
-until their resolution has observed evidence. Keep the user's request
+workspace, all prior reviews, human guidance and the implementer's latest
+response. The response supplies repair evidence and rebuttals to investigate;
+the reviewer independently checks those claims without inheriting the private
+implementation conversation. Reviews return to the continuing implementer. Only
+independent verification can complete the whole goal. Keep the user's request
 authoritative rather than replacing it with a generated acceptance contract.
 Planning remains part of ordinary implementation when useful.
+
+Retain complete reviews as history. A review must reassess material earlier
+concerns and explain repairs, remaining defects or mistaken objections against
+the governing sources. Completion depends on the current assessment's coverage
+and criteria. There is no persistent open/closed finding registry: labels cannot
+create obligations or invalidate otherwise usable feedback. The controller
+validates response structure, not the truth of an observation or requirement.
+This trades mechanical record-closure checks for explicit semantic reassessment;
+review quality must be evaluated on real tasks, including missed prior concerns.
+
+An external committee's report belongs to the caller's task context. The goal
+does not interpret that committee's labels or manage its approvals. After repair,
+the caller can submit the workspace to the committee again.
 
 This separates work continuity from review timing. A worker may make substantial
 partial progress without starting another expensive review. Requesting review

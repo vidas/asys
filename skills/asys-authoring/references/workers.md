@@ -44,8 +44,18 @@ their types. A review can return `approved: false` with `exception: null`.
 The request is the objective and governing criteria. The implementation agent
 keeps a conversation across work turns; `goal_status: "continue"` continues work,
 and `goal_status: "review"` asks an independent verifier to check it. Verification
-receives the objective, workspace, open findings and human guidance, without the
-implementer's completion narrative. Only verification completes the goal.
+receives the objective, workspace, all previous reviews, human guidance and the
+implementer's latest response, including repair evidence and rebuttals. It checks
+those claims independently in a fresh session. Reviews remain history; there is
+no finding registry or ID-based closure protocol. Earlier criticisms must be
+reassessed against the governing requirements and current evidence. Completion
+requires complete assessment coverage and satisfied criteria in the current
+review. Only verification completes the goal.
+
+External review feedback, such as a Senate rejection, can be included in the
+request. The caller schedules any required external review after repair. Goal
+checkpoints use version 4; older checkpoints can be inspected but need a new goal
+invocation against the preserved workspace to use this controller.
 
 Optional `model` selects a model. Omitting `maxAttempts` leaves attempts unlimited;
 the limit counts successful implementation turns, including `continue`.

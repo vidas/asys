@@ -9,7 +9,7 @@ import { human } from './human.mjs';
 import { readJSON, writeJSON } from './files.mjs';
 import { systemModel } from './system-model.mjs';
 import { requiredString } from './values.mjs';
-import { implementationResult, verification, reconcileFindings } from './goal/results.mjs';
+import { implementationResult, verification } from './goal/results.mjs';
 
 const instructions = Object.fromEntries(['implement', 'verify'].map(phase =>
   [phase, readFileSync(new URL(`./goal/${phase}.md`, import.meta.url), 'utf8').trim()]));
@@ -54,14 +54,14 @@ export async function goal({ job, argv, env, signal }, { executeAgent = agent, a
   const checkpoint = join(job.directory, 'goal.json');
   const workspace = realpathSync(job.workspace);
   const state = readJSON(checkpoint, null) ?? {
-    version: 3, goal: original, agent: 'simple', model, workspace, maxAttempts,
-    status: 'running', attempt: 1, nextPhase: 'implement', sessions: [], human: [], findings: [], startedAt: now(),
+    version: 4, goal: original, agent: 'simple', model, workspace, maxAttempts,
+    status: 'running', attempt: 1, nextPhase: 'implement', sessions: [], human: [], reviews: [], startedAt: now(),
   };
-  if (state.version !== 3) throw new Error('This goal checkpoint uses an older workflow; start a new goal to use explicit continuation and completion review');
+  if (state.version !== 4) throw new Error('This goal checkpoint uses an older workflow; start a new goal to use review history and current-work assessment');
   if (state.goal !== original || state.model !== model || state.workspace !== workspace || state.maxAttempts !== maxAttempts) {
     throw new Error('Goal checkpoint does not match the requested goal, model, workspace or attempt limit');
   }
-  if (!Array.isArray(state.sessions) || !Array.isArray(state.human) || !Array.isArray(state.findings) ||
+  if (!Array.isArray(state.sessions) || !Array.isArray(state.human) || !Array.isArray(state.reviews) ||
       !Number.isSafeInteger(state.attempt) || state.attempt < 1 || !['implement', 'verify'].includes(state.nextPhase)) {
     throw new Error('Invalid goal checkpoint');
   }
@@ -77,9 +77,9 @@ export async function goal({ job, argv, env, signal }, { executeAgent = agent, a
     signal.throwIfAborted();
     state.status = status;
     state.finishedAt = now();
+    const review = state.reviews.at(-1);
     state.result = { final, exception, verified: status === 'completed', attempts: state.attempt,
-      ...(state.verification?.attempt === state.attempt ? { criteria: state.verification.criteria } : {}),
-      findings: state.findings.filter(item => item.status === 'open') };
+      ...(review?.attempt === state.attempt ? { criteria: review.criteria, coverage: review.coverage } : {}) };
     save();
     event('goal.finished', { status, attempt: state.attempt, verified: status === 'completed' });
     return state.result;
@@ -88,11 +88,10 @@ export async function goal({ job, argv, env, signal }, { executeAgent = agent, a
   function assignmentData(name) {
     const context = { phase: name, goal: original, attempt: state.attempt, maxAttempts,
       humanGuidance: state.human.map(({ phase, question, answer }) => ({ phase, question, answer })),
-      unresolvedFindings: state.findings.filter(item => item.status === 'open') };
-    // Reviewers get requirements and prior observations, never the implementer's
-    // completion narrative. Only the implementer gets the review's feedback.
-    if (name === 'implement') context.verification = state.verification ?? null;
-    else context.previousCriteria = state.verification?.criteria ?? [];
+      reviews: state.reviews };
+    // A fresh reviewer can examine the implementer's evidence and rebuttals
+    // without inheriting its conversation or treating its claims as proof.
+    if (name === 'verify') context.implementationResponse = state.implementation.final;
     return context;
   }
 
@@ -210,10 +209,9 @@ export async function goal({ job, argv, env, signal }, { executeAgent = agent, a
         }
       }
       if (state.nextPhase === 'verify') {
-        const result = await phase('verify', result => verification(result, state.findings));
+        const result = await phase('verify', verification);
         if (!result) return finish('stopped', 'The human stopped the goal during verification.', 'Stopped by human');
-        state.verification = { ...result, attempt: state.attempt };
-        reconcileFindings(state.findings, result, state.attempt);
+        state.reviews.push({ ...result, attempt: state.attempt });
         if (result.verified) return finish('completed', result.final);
         final = result.final;
       }

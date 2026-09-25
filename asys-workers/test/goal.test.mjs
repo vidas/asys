@@ -13,16 +13,14 @@ import { assistant, model } from './helpers.mjs';
 
 const implemented = { final: 'IMPLEMENTER_CLAIMS_SUCCESS', exception: null, goal_status: 'review' };
 const progress = { final: 'Useful progress made; required work remains.', exception: null, goal_status: 'continue' };
-const criterion = { id: 'C1', requirement: 'Produce the required output', basis: 'Original user request' };
+const criterion = { requirement: 'Produce the required output', basis: 'Original user request' };
 const blocked = { final: 'Inspected inputs; the specification is missing and existing work is preserved.',
   exception: 'Missing specification', question: 'Please supply the expected output format.' };
 const assignment = context => JSON.parse(context.job.input.prompt.split('Assignment data:\n')[1]);
 const observed = [{ source: 'cat output.txt', observation: 'The file contains the required output.' }];
 const checked = (data, satisfied = true) => ({ final: satisfied ? 'Observed the required output.' : 'Output is still missing.',
   exception: null, coverage: 'complete', criteria: [{ ...criterion, status: satisfied ? 'satisfied' : 'unmet',
-    evidence: satisfied ? observed : [{ source: 'cat output.txt', observation: 'File does not exist.' }] }],
-  resolved_findings: satisfied ? data.unresolvedFindings.map(item =>
-    ({ id: item.id, reason: 'Checked the previously missing behavior.', evidence: observed })) : [] });
+    evidence: satisfied ? observed : [{ source: 'cat output.txt', observation: 'File does not exist.' }] }] });
 const normal = data => data.phase === 'implement' ? implemented : checked(data);
 
 async function fixture(t, input = {}) {
@@ -45,7 +43,7 @@ async function fixture(t, input = {}) {
   };
 }
 
-test('implementation starts directly and receives review findings; verification stays independent', async t => {
+test('implementation receives review history; fresh verification receives its response but no private history', async t => {
   const f = await fixture(t), calls = [], dependencies = [];
   let verifications = 0;
   const result = await f.run({ async executeAgent(context, options) {
@@ -60,7 +58,8 @@ test('implementation starts directly and receives review findings; verification 
       await writeFile(join(context.job.directory, 'lessons.md'), 'IMPLEMENTATION_LESSON');
       return implemented;
     }
-    assert.doesNotMatch(context.job.input.prompt, /IMPLEMENTER_CLAIMS_SUCCESS|IMPLEMENTATION_LESSON/);
+    assert.equal(data.implementationResponse, implemented.final);
+    assert.doesNotMatch(context.job.input.prompt, /IMPLEMENTATION_LESSON/);
     assert.equal(options.sessionFile, undefined);
     return checked(data, ++verifications > 1);
   } });
@@ -71,15 +70,16 @@ test('implementation starts directly and receives review findings; verification 
   assert.equal(new Set(calls.map(call => call.job.workspace)).size, 1);
   assert.equal(dependencies[0].sessionFile, join(f.directory, 'implementation/session.jsonl'));
   assert.equal(dependencies[2].sessionFile, dependencies[0].sessionFile);
-  assert.equal(assignment(calls[2]).verification.final, 'Output is still missing.');
-  assert.equal(assignment(calls[2]).unresolvedFindings[0].id, 'F1');
-  assert.equal(assignment(calls[3]).previousCriteria[0].requirement, criterion.requirement);
+  assert.equal(assignment(calls[2]).reviews[0].final, 'Output is still missing.');
+  assert.equal(assignment(calls[3]).reviews[0].criteria[0].requirement, criterion.requirement);
+  assert.equal(assignment(calls[2]).implementationResponse, undefined);
   const state = await f.state();
-  assert.equal(state.version, 3);
+  assert.equal(state.version, 4);
   assert.equal(state.status, 'completed');
   assert.equal(state.sessions[0].lessons, 'IMPLEMENTATION_LESSON');
-  assert.equal(state.findings[0].status, 'resolved');
-  assert.deepEqual(state.findings[0].resolutionEvidence, observed);
+  assert.equal(state.reviews.length, 2);
+  assert.equal(state.reviews[0].criteria[0].status, 'unmet');
+  assert.deepEqual(state.reviews[1].criteria[0].evidence, observed);
   for (const session of state.sessions) {
     assert.deepEqual(JSON.parse(await readFile(join(f.directory, session.directory, 'result.json'))), session.result);
   }
@@ -112,8 +112,8 @@ test('a premature review request and narrow passing checks do not complete the o
   assert.equal(result.attempts, 2);
   assert.equal(result.verified, true);
   assert.equal(implementations[1].goal, implementations[0].goal);
-  assert.match(implementations[1].verification.final, /UTF-8/);
-  assert.equal(implementations[1].unresolvedFindings.length, 1);
+  assert.match(implementations[1].reviews.at(-1).final, /UTF-8/);
+  assert.equal(implementations[1].reviews.length, 1);
 });
 
 test('ordinary progress turns continue the same implementation without invoking a reviewer', async t => {
@@ -124,7 +124,7 @@ test('ordinary progress turns continue the same implementation without invoking 
     phases.push(data.phase);
     if (data.phase === 'verify') return checked(data);
     files.push(options.sessionFile);
-    assert.equal(data.verification, null, 'progress does not manufacture verification feedback');
+    assert.deepEqual(data.reviews, [], 'progress does not manufacture review feedback');
     return ++implementations < 4 ? progress : implemented;
   } });
   assert.equal(result.verified, true);
@@ -142,15 +142,15 @@ test('rejected completion can be followed by partial repairs before another revi
     if (data.phase === 'verify') return checked(data, ++reviews === 2);
     implementations++;
     if (implementations > 1) {
-      assert.match(data.verification.final, /missing/);
-      assert.equal(data.unresolvedFindings[0].id, 'F1');
+      assert.match(data.reviews.at(-1).final, /missing/);
+      assert.equal(data.reviews[0].criteria[0].status, 'unmet');
     }
     return implementations === 2 ? progress : implemented;
   } });
   assert.equal(result.verified, true);
   assert.equal(result.attempts, 3);
   assert.deepEqual(phases, ['implement', 'verify', 'implement', 'implement', 'verify']);
-  assert.equal((await f.state()).findings[0].resolvedAttempt, 3);
+  assert.deepEqual((await f.state()).reviews.map(review => review.attempt), [1, 3]);
 });
 
 for (const reviewOnLastTurn of [false, true]) {
@@ -220,24 +220,26 @@ test('attempt exhaustion preserves gaps; an unlimited goal continues beyond thre
     assert.equal(result.verified, cap === null);
     const state = await f.state();
     assert.equal(state.status, cap ? 'exhausted' : 'completed');
-    assert.equal(state.findings.length, 1, 'identical observations do not duplicate findings');
+    assert.equal(state.reviews.length, cap ?? 4, 'each assessment remains in review history');
     if (cap) assert.match(result.exception, /after 2 attempts/);
   }
 });
 
-test('passing criteria cannot erase a prior finding by omission', async t => {
+test('earlier concerns remain available even when an intermediate review omits them', async t => {
   const f = await fixture(t);
   let reviews = 0;
   const result = await f.run({ async executeAgent(context) {
     const data = assignment(context);
     if (data.phase === 'implement') return implemented;
     if (++reviews === 1) return checked(data, false);
-    if (reviews === 2) return { ...checked(data), verified: true, resolved_findings: [] };
-    assert.equal(data.unresolvedFindings[0].id, 'F1');
-    return checked(data);
+    if (reviews === 2) return { ...checked(data), coverage: 'gap', final: 'Another required check is unavailable.' };
+    assert.equal(data.reviews.length, 2);
+    assert.equal(data.reviews[0].criteria[0].status, 'unmet');
+    assert.equal(data.reviews[1].coverage, 'gap');
+    return { ...checked(data), final: 'Rechecked the original missing output and the later check; both now pass.' };
   } });
   assert.equal(result.attempts, 3);
-  assert.equal((await f.state()).findings[0].resolvedAttempt, 3);
+  assert.deepEqual((await f.state()).reviews.map(review => review.attempt), [1, 2, 3]);
 });
 
 test('unavailable evidence remains unverified, distinct from an observed defect', async t => {
@@ -249,7 +251,96 @@ test('unavailable evidence remains unverified, distinct from an observed defect'
   } });
   assert.equal(result.verified, false);
   assert.equal(result.criteria[0].status, 'unverified');
-  assert.match(result.findings[0].explanation, /could not obtain/);
+  assert.match(result.criteria[0].explanation, /could not obtain/);
+});
+
+test('a Senate repair task returns a real gap to implementation regardless of discussion labels', async t => {
+  const request = 'Repair the Senate objections: pre-edge checking, stale evidence rejection and accurate coverage. ' +
+    'The approved plan also requires testing a data width above 32 bits.';
+  const f = await fixture(t, { goal: request }), phases = [];
+  let reviews = 0;
+  const wider = { requirement: 'Exercise a data width above 32 bits', basis: 'Approved plan', status: 'unmet',
+    evidence: [{ source: 'build modes', observation: 'Only widths 1, 8, 16 and 32 are configured.' }] };
+  const result = await f.run({ async executeAgent(context) {
+    const data = assignment(context);
+    phases.push(data.phase);
+    assert.equal(data.goal, request);
+    if (data.phase === 'implement') {
+      if (data.attempt === 2) assert.deepEqual(data.reviews[0].criteria[0].evidence, wider.evidence);
+      return implemented;
+    }
+    assert.equal(data.correction, undefined, 'engineering feedback must not require label correction');
+    if (++reviews === 1) return { final: 'PF1, PF2 and PF3 repaired; the wider-data case is still absent.',
+      exception: null, coverage: 'gap', criteria: [wider],
+      // Reproduce the extra field that stopped the real repair run. It has no control semantics.
+      resolved_findings: ['PF1', 'PF2', 'PF3'].map(id => ({ id, reason: 'Repaired', evidence: observed })) };
+    return { final: 'Rechecked all Senate objections and observed the wider-data case passing.', exception: null,
+      coverage: 'complete', criteria: [{ ...wider, status: 'satisfied',
+        evidence: [{ source: 'width-64 test', observation: 'Upper data bits were exercised and checked.' }] }] };
+  }, askHuman() { assert.fail('ordinary review feedback must return to implementation'); } });
+  assert.equal(result.verified, true);
+  assert.deepEqual(phases, ['implement', 'verify', 'implement', 'verify']);
+  assert.equal((await f.state()).reviews.length, 2);
+});
+
+test('a mistaken demand can be withdrawn after an independently checked rebuttal', async t => {
+  const f = await fixture(t);
+  const rebuttal = 'The request requires output.txt only; it does not require a second JSON export. ' +
+    'Read the original request and output.txt to verify this.';
+  const result = await f.run({ async executeAgent(context) {
+    const data = assignment(context);
+    if (data.phase === 'implement') return data.attempt === 1 ? implemented : { ...implemented, final: rebuttal };
+    if (data.attempt === 1) return { ...checked(data, false), final: 'A second JSON export is missing.',
+      criteria: [{ ...criterion, requirement: 'Also export JSON', status: 'unmet',
+        evidence: [{ source: 'workspace', observation: 'No JSON export is present.' }] }] };
+    assert.equal(data.implementationResponse, rebuttal);
+    assert.equal(data.reviews[0].criteria[0].requirement, 'Also export JSON');
+    return { ...checked(data), final: 'Read the request and output.txt. The output meets the request; ' +
+      'the earlier JSON-export demand was unsupported and is withdrawn.' };
+  } });
+  assert.equal(result.verified, true);
+  assert.equal(result.attempts, 2);
+  const history = (await f.state()).reviews;
+  assert.equal(history.length, 2);
+  assert.match(history[1].final, /unsupported and is withdrawn/);
+});
+
+test('criterion labels are optional discussion text and cannot override an unmet assessment', async t => {
+  const f = await fixture(t, { maxAttempts: 1 });
+  const result = await f.run({ async executeAgent(context) {
+    const data = assignment(context);
+    if (data.phase === 'implement') return implemented;
+    return { ...checked(data), criteria: [
+      { ...checked(data).criteria[0], id: 'F1' },
+      { ...checked(data, false).criteria[0], id: 'F1', requirement: 'Another required outcome' },
+    ] };
+  } });
+  assert.equal(result.verified, false);
+  assert.match(result.exception, /Goal remains unmet/);
+  assert.equal((await f.state()).sessions.filter(s => s.phase === 'verify').length, 1);
+});
+
+test('review history survives interruption and is supplied to the resumed verifier', async t => {
+  const f = await fixture(t), interruption = new Error('interrupted between reviews');
+  await assert.rejects(f.run({ async executeAgent(context) {
+    const data = assignment(context);
+    if (data.phase === 'implement') return implemented;
+    if (data.attempt === 1) return checked(data, false);
+    f.controller.abort(interruption);
+    throw interruption;
+  } }), /interrupted between reviews/);
+  assert.equal((await f.state()).reviews.length, 1);
+  f.context.signal = new AbortController().signal;
+  const result = await f.run({ async executeAgent(context) {
+    const data = assignment(context);
+    assert.equal(data.phase, 'verify', 'completed implementation must not repeat');
+    assert.equal(data.reviews.length, 1);
+    assert.equal(data.reviews[0].criteria[0].status, 'unmet');
+    assert.equal(data.implementationResponse, implemented.final);
+    return checked(data);
+  } });
+  assert.equal(result.verified, true);
+  assert.deepEqual((await f.state()).reviews.map(review => review.attempt), [1, 2]);
 });
 
 for (const phase of ['implement', 'verify']) {
@@ -428,14 +519,14 @@ test('restart with a pending review cannot finish from the implementation claim 
   assert.equal(implementations, 1);
 });
 
-test('saved checkpoints reject a different goal and both earlier workflow versions', async t => {
+test('saved checkpoints reject a different goal and earlier workflow versions', async t => {
   const f = await fixture(t);
   await f.run({ async executeAgent(context) { return normal(assignment(context)); } });
   f.context.job.input.goal = 'A different goal';
   await assert.rejects(f.run(), /checkpoint does not match/);
   f.context.job.input.goal = 'Produce the required output';
   const state = await f.state();
-  for (const version of [1, 2]) {
+  for (const version of [1, 2, 3]) {
     await writeFile(join(f.directory, 'goal.json'), JSON.stringify({ ...state, version }));
     await assert.rejects(f.run(), /older workflow/);
   }
@@ -445,10 +536,9 @@ test('malformed verifier reports get one fresh correction, never another impleme
   const invalid = [
     data => ({ ...checked(data), criteria: [] }),
     data => ({ ...checked(data), coverage: 'maybe' }),
-    data => ({ ...checked(data), criteria: [checked(data).criteria[0], checked(data).criteria[0]] }),
+    data => ({ ...checked(data), criteria: [null] }),
     data => ({ ...checked(data), criteria: [{ ...checked(data).criteria[0], basis: '' }] }),
     data => ({ ...checked(data), criteria: [{ ...checked(data).criteria[0], evidence: [] }] }),
-    data => ({ ...checked(data), resolved_findings: [{ id: 'F99', reason: 'Claimed fixed', evidence: observed }] }),
   ];
   for (const verdict of invalid) {
     const f = await fixture(t);
@@ -473,21 +563,6 @@ test('a positive worker boolean cannot override unmet criteria', async t => {
     return data.phase === 'implement' ? implemented : { ...checked(data, false), verified: true };
   } });
   assert.equal(result.verified, false);
-});
-
-test('an open finding cannot be resolved without observed evidence', async t => {
-  const f = await fixture(t);
-  let reviews = 0;
-  const result = await f.run({ async executeAgent(context) {
-    const data = assignment(context);
-    if (data.phase === 'implement') return implemented;
-    if (++reviews === 1) return checked(data, false);
-    return { ...checked(data), resolved_findings: [{ id: 'F1', reason: 'Claimed fixed', evidence: [] }] };
-  } });
-  assert.equal(result.verified, false);
-  assert.match(result.exception, /resolution needs observed evidence/);
-  assert.equal(reviews, 3, 'the invalid second verdict gets one correction');
-  assert.equal((await f.state()).findings[0].status, 'open');
 });
 
 test('model overrides work and invalid limits fail before inference', async t => {
@@ -529,12 +604,12 @@ test('real sessions continue partial work, retain review feedback and isolate fi
           if (implementationTurns === 2) {
             assert.ok(messages.some(m => m.role === 'toolResult' && m.toolCallId === 'implement-1'));
             assert.ok(messages.some(m => m.role === 'assistant' && m.content.some(p => p.text?.includes('Useful progress made'))));
-            assert.equal(data.verification, null);
+            assert.deepEqual(data.reviews, []);
             assert.equal(reviews, 0, 'partial work must continue before any review');
           }
           if (implementationTurns >= 3) {
             assert.ok(messages.some(m => m.role === 'toolResult' && m.toolCallId === 'implement-2'));
-            assert.match(data.verification.final, /missing/);
+            assert.match(data.reviews.at(-1).final, /missing/);
             assert.equal(reviews, 1, 'partial repairs must not trigger another review');
           }
           message = assistant([{ type: 'toolCall', id: `implement-${implementationTurns}`, name: 'bash',
@@ -542,7 +617,8 @@ test('real sessions continue partial work, retain review feedback and isolate fi
         } else {
           reviews++;
           assert.equal(messages.length, 1);
-          assert.doesNotMatch(JSON.stringify(messages), /IMPLEMENTER_CLAIMS_SUCCESS/);
+          assert.equal(data.implementationResponse, implemented.final);
+          assert.equal(messages.some(m => m.role === 'toolResult'), false);
           message = assistant([{ type: 'toolCall', id: `verify-${reviews}`, name: 'bash', arguments: { command: 'cat output.txt' } }], 'toolUse');
         }
       } else {

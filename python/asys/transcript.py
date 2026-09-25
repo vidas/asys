@@ -222,7 +222,7 @@ class JobOutput:
         agent = document.get("agent")
         errors = [f"stderr: {line}" for line in tail(directory / "stderr.log", 100)]
         goal = self.files.read(directory / 'goal.json')
-        if goal.get('version') in (1, 2, 3) and isinstance(goal.get('sessions'), list):
+        if goal.get('version') in (1, 2, 3, 4) and isinstance(goal.get('sessions'), list):
             return 'Goal', self.read_goal(directory, goal) + errors
         senate = self.files.read(directory / 'senate.json')
         if senate.get('version') == 1 and isinstance(senate.get('sessions'), list):
