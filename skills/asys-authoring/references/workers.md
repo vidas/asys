@@ -22,7 +22,7 @@ precedence. Workflow types must be explicitly declared in `workers.json`.
   "version": 1,
   "kind": "agent",
   "description": "Edit the assigned project files and check the result.",
-  "config": {"agent": "editor", "maxSteps": 30}
+  "config": {"agent": "editor", "maxSteps": 30, "reasoning": "high"}
 }
 ```
 
@@ -30,6 +30,10 @@ precedence. Workflow types must be explicitly declared in `workers.json`.
 an exported model ID. Otherwise the `simple` system-model default applies.
 `system: true` is supported only with `agent: "simple"` for the bundled prompt.
 `parameters.maxSteps` overrides the definition's positive step limit for one job.
+Optional `reasoning` selects Pi's reasoning effort: `off`, `minimal`, `low`,
+`medium`, `high`, `xhigh` or `max`; omitted means `medium`. Pi lowers a level
+the model does not support and uses `off` for a model without reasoning; the job
+then logs `agent.reasoning_adjusted`, and `agent.json` records the effective level.
 
 An agent reports a JSON object with nonempty `final` and `exception: null` or a
 nonempty blocker. Request any additional fields needed downstream, including

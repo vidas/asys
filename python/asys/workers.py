@@ -120,6 +120,8 @@ Files and configuration:
   agent   Also creates agents/NAME/prompt.md. Write the agent's instructions
           there. In workers/NAME.json, config.agent selects these assets;
           config.model and config.maxSteps optionally select a model and limit.
+          config.reasoning optionally selects the reasoning effort: off,
+          minimal, low, medium (the default), high, xhigh or max.
   goal    No agent prompt is required. Put the task in the run request.
           config.model selects a model; config.maxAttempts limits retries
           (unlimited when omitted).

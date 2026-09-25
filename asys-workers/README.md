@@ -80,6 +80,8 @@ within the decision deadline; capacity exhaustion returns to its controller,
 matching the swarm inference policy.
 Pi's separate transport retry loop is disabled. `maxSteps` counts logical
 inference calls, including compaction, rather than transport retries.
+`--reasoning LEVEL`, from an agent definition's `reasoning`, sets the Pi session
+thinking level; the Provider passes it through to the native request.
 
 `agent.json` retains the conversation; stdout records streaming activity,
 retries, compaction and diagnostics. `asys top RUN` and the dashboard
