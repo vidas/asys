@@ -127,7 +127,7 @@ class AuthoringTests(unittest.TestCase):
     def test_import_validates_kind_and_creates_selected_agent_assets(self):
         source = self.directory / 'definition.json'
         value = {'version': 1, 'kind': 'agent', 'description': 'Inspect the design.',
-                 'config': {'agent': 'inspector', 'model': 'pool/model', 'maxSteps': 9}}
+                 'config': {'agent': 'inspector', 'model': 'pool/model', 'maxSteps': 9, 'reasoning': 'high'}}
         source.write_text(json.dumps(value))
         self.invoke('workers', 'add', 'agent', 'inspect', '--file', source)
         self.assertEqual(load_definition(self.environment, 'inspect'), value)
@@ -145,6 +145,9 @@ class AuthoringTests(unittest.TestCase):
             {'version': True, 'kind': 'goal', 'config': {}},
             {'version': 1, 'kind': 'agent', 'config': {'agent': '../outside'}},
             {'version': 1, 'kind': 'agent', 'config': {'agent': 'other', 'system': True}},
+            {'version': 1, 'kind': 'agent', 'config': {'agent': 'other', 'reasoning': 'extreme'}},
+            {'version': 1, 'kind': 'agent', 'config': {'agent': 'other', 'reasoning': None}},
+            {'version': 1, 'kind': 'goal', 'config': {'reasoning': 'high'}},
             {'version': 1, 'kind': 'goal', 'config': {'maxAttempts': True}},
             {'version': 1, 'kind': 'goal', 'config': {'model': ' '}},
             {'version': 1, 'kind': 'swarm', 'config': {'version': 1, 'world': {'channel': 'world'}}},

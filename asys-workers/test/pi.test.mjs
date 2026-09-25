@@ -595,3 +595,31 @@ test('cancellation interrupts retry backoff without starting another attempt', a
   assert.equal(result.stopReason, 'aborted');
   assert.equal(calls, 1);
 });
+
+test('an agent reasoning level selects the Pi thinking level sent to the Provider', async t => {
+  const workspace = await mkdtemp(join(tmpdir(), 'asys-reasoning-'));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  const final = JSON.stringify({ final: 'Checked.', exception: null });
+  for (const [reasoning, capable, sent, effective] of [
+    ['high', true, 'high', 'high'],
+    ['off', true, undefined, 'off'],
+    ['high', false, undefined, 'off'],
+  ]) {
+    const requests = [], events = [];
+    const provider = {
+      async listModels() { return { models: [{ ...model, capabilities: { ...model.capabilities, reasoning: capable } }] }; },
+      async *infer(request) {
+        requests.push(JSON.parse(request.payload));
+        yield { payload: JSON.stringify({ type: 'done', reason: 'stop', message: assistant([{ type: 'text', text: final }]) }) };
+      },
+    };
+    const job = { id: `reasoning-${reasoning}-${capable}` };
+    await runAgent({ config: { model: 'fixture/model', prompt: 'Check the board.', maxSteps: 1, options: {}, reasoning },
+      job, workspace, signal: new AbortController().signal, provider, save() {},
+      event(type, data) { events.push({ type, ...data }); } });
+    assert.equal(requests[0].options.reasoning, sent, `${reasoning} on capable=${capable}`);
+    assert.equal(job.agent.reasoning, effective);
+    const adjusted = events.filter(e => e.type === 'agent.reasoning_adjusted');
+    assert.deepEqual(adjusted, effective === reasoning ? [] : [{ type: 'agent.reasoning_adjusted', requested: reasoning, effective }]);
+  }
+});

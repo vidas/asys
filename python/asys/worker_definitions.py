@@ -19,6 +19,9 @@ from asys_runtime.files import read_json, validate_name, write_json, write_text_
 
 
 KINDS = ('agent', 'goal', 'senate', 'swarm')
+# Pi thinking levels. Pi lowers a level the selected model does not support,
+# and uses off for a model without reasoning.
+REASONING_LEVELS = ('off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max')
 BUILTINS = ('simple', 'goal')
 DEFINITION_LIMIT = 128 * 1024
 DISPATCHER = '/opt/asys/asys-workers/tools/asys-worker'
@@ -59,7 +62,7 @@ def validate_definition(value, environment=None):
         _text(value['description'], 'description', empty=True)
     config = value.get('config')
     if kind == 'agent':
-        _object(config, 'agent config', {'agent', 'system', 'model', 'maxSteps'})
+        _object(config, 'agent config', {'agent', 'system', 'model', 'maxSteps', 'reasoning'})
         validate_name('agent name', config.get('agent'))
         if 'system' in config and type(config['system']) is not bool:
             raise ValueError('agent config.system must be true or false')
@@ -67,6 +70,8 @@ def validate_definition(value, environment=None):
             raise ValueError('The supported system agent is simple')
         if 'maxSteps' in config:
             _positive(config['maxSteps'], 'maxSteps')
+        if 'reasoning' in config and config['reasoning'] not in REASONING_LEVELS:
+            raise ValueError(f'agent config.reasoning must be one of {", ".join(REASONING_LEVELS)}')
     elif kind == 'goal':
         _object(config, 'goal config', {'model', 'maxAttempts'})
         if 'maxAttempts' in config:

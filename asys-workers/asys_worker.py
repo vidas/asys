@@ -65,6 +65,8 @@ def prepare(definition, payload, environment, *, model=None, definition_path=Non
         command += ['--agent', config['agent']]
         if config.get('system'):
             command += ['--system-agent']
+        if 'reasoning' in config:
+            command += ['--reasoning', config['reasoning']]
     elif kind == 'goal':
         adapted = {'goal': payload['request']}
         if 'maxAttempts' in config:

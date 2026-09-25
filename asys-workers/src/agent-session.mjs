@@ -8,6 +8,10 @@ import { agentResult } from './agent-definition.mjs';
 import { workerPrompt } from './system-prompt.mjs';
 import { agentModel } from './agent-model.mjs';
 
+// Pi thinking levels. Without a level Pi uses medium; it lowers a level the
+// model does not support and uses off for a model without reasoning.
+export const REASONING_LEVELS = Object.freeze(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+
 // Pi owns the agent loop, local tools, context management, and session format.
 // Ordinary jobs are fresh. A goal may explicitly retain its implementer's session.
 export async function runAgent({ config, job, signal, provider, workspace: cwd, jobDirectory, definition, sessionFile, extensionPaths = [], save, event, customTools = [] }) {
@@ -54,7 +58,12 @@ export async function runAgent({ config, job, signal, provider, workspace: cwd, 
   const extensionErrors = resourceLoader.getExtensions().errors;
   if (extensionErrors.length) throw new Error(`Pi extension loading failed: ${extensionErrors.map(e => `${e.path}: ${e.error}`).join('; ')}`);
   const { session } = await createAgentSession({ cwd, agentDir, modelRuntime, model,
-    resourceLoader, sessionManager, settingsManager, customTools });
+    resourceLoader, sessionManager, settingsManager, customTools,
+    ...(config.reasoning === undefined ? {} : { thinkingLevel: config.reasoning }) });
+  state.reasoning = session.thinkingLevel;
+  if (config.reasoning !== undefined && session.thinkingLevel !== config.reasoning) {
+    event('agent.reasoning_adjusted', { requested: config.reasoning, effective: session.thinkingLevel });
+  }
   const onAbort = () => {
     session.abortCompaction();
     session.abortBranchSummary();
