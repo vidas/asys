@@ -362,6 +362,57 @@ class Resume(unittest.TestCase):
         self.assertEqual(self.path.read_text(), before)
         self.assertEqual(self.launcher.owned, [])
 
+    def test_resume_reattaches_live_components_and_consumes_queued_completion_without_new_jobs(self):
+        self.record['world_components'] = {'worlds/routing': {'name': 'example-world-abc123', 'role': 'world-routing'}}
+        self.record['channel_after'] = 0
+        self.path.write_text(json.dumps(self.record))
+        names = [*self.record['components'].values(), 'example-world-abc123']
+        components = [{'name': name, 'status': {'status': 'running', 'health': 'healthy'}} for name in names]
+        with patch.object(self.launcher, 'document', return_value={'components': components}), \
+                patch.object(self.launcher, 'start_components') as start, \
+                patch.object(self.launcher, 'refresh_environment') as refresh:
+            self.launcher.setup()
+        start.assert_not_called()
+        refresh.assert_not_called()
+        self.assertTrue(self.launcher.reattaching)
+        self.assertEqual(self.launcher.owned, ['example-world-abc123',
+                                              'example-workers-abc123', 'example-workflow-abc123'])
+        writer = module['Writer'](self.directory / 'runtime/channels/workflow/out')
+        event = writer.send('activity.start', {'store': 1, 'runId': 'abc123', 'activityId': 'work',
+                            'time': '2026-09-14T10:01:00Z', 'data': {'name': 'Work'}})
+        module['Reader'](writer.directory).advance(event['sequence'])
+        writer.send('run.result', {'runId': 'abc123', 'status': 'completed', 'output': {'work': 42}})
+        with patch.object(module['Writer'], 'send') as send:
+            self.launcher.execute()
+        send.assert_not_called()
+        self.launcher.snapshot()
+        record = json.loads(self.path.read_text())
+        self.assertEqual(record['status'], 'completed')
+        self.assertEqual(record['channel_after'], 0)
+        self.assertNotIn('error', record)
+        self.assertIn('reattached_at', record)
+        # Release test ownership without making a live cleanup call.
+        self.launcher.owned = []
+
+    def test_resume_does_not_adopt_unhealthy_or_partially_missing_execution(self):
+        for kind in ['unhealthy', 'missing world', 'pending operation']:
+            with self.subTest(kind=kind):
+                components = [{'name': name, 'status': {'status': 'running', 'health': 'healthy'}}
+                              for name in self.record['components'].values()]
+                document = {'components': components}
+                if kind == 'unhealthy':
+                    components[0]['status']['health'] = 'unhealthy'
+                elif kind == 'missing world':
+                    self.record['world_components'] = {'worlds/world': {'name': 'missing-world', 'role': 'world-test'}}
+                    self.path.write_text(json.dumps(self.record))
+                else:
+                    document['operation'] = {'kind': 'apply'}
+                with patch.object(self.launcher, 'document', return_value=document), \
+                        self.assertRaises(module['LaunchError']):
+                    self.launcher.setup()
+                self.assertEqual(self.launcher.owned, [])
+                self.launcher.close()
+
     def test_resume_skips_old_result_and_appends_new_events(self):
         self.setup()
         channel = self.directory / "runtime/channels/workflow"

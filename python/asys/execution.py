@@ -10,7 +10,7 @@ import uuid
 from asys_runtime.environment import Environment
 from asys_runtime.files import write_json
 from asys_runtime.permissions import mkdir, shared
-from .lifecycle import ComponentHost, LaunchError
+from .lifecycle import ComponentHost, LaunchError, CommandTimeout
 from .human_service import ensure_human
 from .config import system_models
 from .options import dcomp_options
@@ -200,9 +200,24 @@ class EnvironmentHost(ComponentHost):
         self.owned.append(name)
         self.command(self.dcomp + ['add-component', *options, self.args.system, name, str(self.directory / directory)])
 
-    def observe(self, *, cleanup=False):
-        document = self.document('view', '--json', self.args.system, cleanup=cleanup)
+    def observe(self, *, cleanup=False, timeout=120):
+        document = self.document('view', '--json', self.args.system, cleanup=cleanup, timeout=timeout)
         return document, {item['name']: item for item in document['components'] if item['name'] in self.owned}
+
+    def monitor_components(self):
+        # A shared lifecycle edit can hold dcomp's status lock. Failure to
+        # observe is not evidence that this run's components have failed.
+        try:
+            _, components = self.observe(timeout=5)
+        except CommandTimeout as error:
+            if not getattr(self, '_status_delayed', False):
+                self.say(f"Component status temporarily unavailable; execution continues and monitoring will retry: {error}")
+            self._status_delayed = True
+            return
+        if getattr(self, '_status_delayed', False):
+            self.say("Component status monitoring recovered")
+            self._status_delayed = False
+        self.check_components(components)
 
     def wait_ready(self):
         deadline = time.monotonic() + 90

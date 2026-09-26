@@ -1,4 +1,5 @@
 """Host launchers must finish ownership changes and clean up only their own work."""
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -10,8 +11,10 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
+ROOT = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(ROOT / "python"), str(ROOT / "asys-runtime")]
 from asys.lifecycle import ComponentHost, Interrupted, LaunchError
+from asys.execution import EnvironmentHost
 
 
 class LifecycleTest(unittest.TestCase):
@@ -98,6 +101,40 @@ class LifecycleTest(unittest.TestCase):
             with self.subTest(status=status), self.assertRaises(LaunchError):
                 self.host.check_components({"workers": {"status": status}})
         self.host.check_components({"workers": {"status": {"status": "running", "health": "healthy"}}})
+
+    def test_busy_system_status_does_not_fail_or_clean_up_an_active_run(self):
+        host = EnvironmentHost(SimpleNamespace(system="test"))
+        host.directory = self.host.directory
+        host.owned = ['worker']
+        messages = []
+        host.say = messages.append
+        lock_path = host.directory / 'system.lock'
+        script = host.directory / 'status.py'
+        script.write_text("import fcntl, json\n"
+                          f"lock = open({str(lock_path)!r}, 'a')\n"
+                          "fcntl.flock(lock, fcntl.LOCK_SH)\n"
+                          "print(json.dumps({'api_version': 2, 'components': ["
+                          "{'name': 'worker', 'status': {'status': 'running', 'health': 'healthy'}}]}))\n")
+        host.dcomp = [sys.executable, str(script)]
+        command = host.command
+        def quick_command(argv, **kwargs):
+            self.assertEqual(kwargs['timeout'], 5)
+            return command(argv, **{**kwargs, 'timeout': .15})
+        with lock_path.open('a') as lock, patch.object(host, 'command', side_effect=quick_command), \
+                patch.object(host, 'cleanup_components') as cleanup:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            host.monitor_components()
+            host.monitor_components()
+            self.assertEqual(len(messages), 1)
+            self.assertIn('execution continues', messages[0])
+            cleanup.assert_not_called()
+            self.assertEqual(host.owned, ['worker'])
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            host.monitor_components()
+        self.assertIn('recovered', messages[-1])
+        with patch.object(host, 'observe', return_value=({}, {'worker': {'status': {'status': 'exited'}}})):
+            with self.assertRaisesRegex(LaunchError, 'unavailable'):
+                host.monitor_components()
 
     def test_effective_connection_paths_are_frozen_with_explicit_options_first(self):
         root = self.host.directory

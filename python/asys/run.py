@@ -278,7 +278,7 @@ class Run(SingleJob):
                 print(json.dumps(result, indent=2, ensure_ascii=False), flush=True)
                 return
             if time.monotonic() >= next_health:
-                self.check_components(self.observe()[1])
+                self.monitor_components()
                 next_health = time.monotonic() + 2
             self.interrupted.wait(0.1)
 

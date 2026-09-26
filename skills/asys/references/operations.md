@@ -81,3 +81,10 @@ implementation conversation internally. Completed runs remain history.
 Interrupting a run requests cancellation and removal of its owned components.
 If cleanup is incomplete, inspect saved diagnostics and the selected dcomp
 system. Shared inference and unrelated components belong to their own owners.
+
+If a failed launcher's complete set of saved components is still healthy,
+`asys-run --resume RUN` reattaches to that execution without restarting jobs.
+Partial component cleanup must be finished before a checkpoint restart.
+A timeout reading shared dcomp status is logged and retried; it does not fail
+unrelated active runs or trigger their cleanup. Actual component failures
+still fail their owning run.

@@ -35,6 +35,7 @@ class Launcher(EnvironmentHost):
     def __init__(self, args):
         super().__init__(args)
         self.active = False
+        self.reattaching = False
         self.request = None
         self.outbound = None
         self.record = {}
@@ -140,8 +141,26 @@ class Launcher(EnvironmentHost):
         if not isinstance(record.get("links"), dict):
             raise LaunchError("This run has no saved environment connections")
         existing = self.document("view", "--json", self.args.system)
-        if existing.get("operation") or any(item["name"] in self.names.values() for item in existing["components"]):
-            raise LaunchError("The previous run's components or dcomp operation are still present; finish their cleanup before resuming")
+        if existing.get("operation"):
+            raise LaunchError("A dcomp operation is still present; finish it before resuming")
+        names = [*(world['name'] for world in record.get('world_components', {}).values()),
+                 *(self.names[role] for role in ('human', 'workers', 'engine') if role in self.names)]
+        components = {item['name']: item for item in existing['components'] if item['name'] in names}
+        if components:
+            if set(components) != set(names):
+                raise LaunchError("Some previous run components are missing; finish their cleanup before resuming")
+            # Adopt only the complete, healthy saved execution, under its
+            # launcher lease. Do not send resume or replace active jobs.
+            self.check_components(components, names=names)
+            if any(item['status'].get('status') != 'running' or
+                   item['status'].get('health') not in {'healthy', 'none'} for item in components.values()):
+                raise LaunchError("Previous run components are not ready; finish recovery before reattaching")
+            if self.args.human:
+                raise LaunchError("Reattach without --human; use asys-human-prompt for human requests")
+            self.owned = names
+            self.reattaching = True
+            self.say(f"Reattaching to live run {self.id} without restarting its jobs")
+            return
         engine_id = self.engine_image()
         self.say(f"Resuming run {self.id}\nState: {directory}")
         self.refresh_environment()
@@ -211,15 +230,19 @@ class Launcher(EnvironmentHost):
         inbound = Writer(direction_root(self.directory / "runtime", CHANNEL, "in"))
         self.outbound = Reader(direction_root(self.directory / "runtime", CHANNEL, "out"))
         resuming = self.args.command == "resume"
-        after = max(self.outbound.sequences(), default=0) if resuming else 0
+        after = (self.outbound.cursor if self.reattaching else
+                 max(self.outbound.sequences(), default=0) if resuming else 0)
         history = WorkflowHistory(self.directory)
         observer = Runs(state_root('runs', root=self.args.root))
         notices = set()
         if resuming:
             history.read(self.record)
             notices = {key for key, _ in agent_notices(observer.progress.events(observer.jobs(self.directory)))}
-        self.record["channel_after"] = after
-        if resuming:
+        if not self.reattaching:
+            self.record["channel_after"] = after
+        if self.reattaching:
+            self.record["reattached_at"] = timestamp()
+        elif resuming:
             self.request = inbound.send("resume", {"id": self.id})
             self.record["resumed_at"] = timestamp()
         else:
@@ -233,7 +256,8 @@ class Launcher(EnvironmentHost):
         self.record.pop("error", None)
         self.record.pop("finished_at", None)
         self.snapshot()
-        self.say(f"{'Resuming' if resuming else 'Running'} {self.record['workflow']} in {self.record['environment']}")
+        action = "Monitoring" if self.reattaching else "Resuming" if resuming else "Running"
+        self.say(f"{action} {self.record['workflow']} in {self.record['environment']}")
 
         def agent_progress():
             for key, line in agent_notices(observer.progress.events(observer.jobs(self.directory))):
@@ -288,7 +312,7 @@ class Launcher(EnvironmentHost):
                 if time.monotonic() >= next_health_check:
                     if self.human:
                         self.human.check()
-                    self.check_components(self.observe()[1])
+                    self.monitor_components()
                     next_health_check = time.monotonic() + 2
                 self.interrupted.wait(0.2)
 

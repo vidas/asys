@@ -13,6 +13,10 @@ class LaunchError(Exception):
     pass
 
 
+class CommandTimeout(LaunchError):
+    pass
+
+
 class Interrupted(Exception):
     pass
 
@@ -55,7 +59,7 @@ class ComponentHost:
                         raise Interrupted()
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
-                        raise LaunchError(f"Command timed out: {shlex.join(command)}")
+                        raise CommandTimeout(f"Command timed out: {shlex.join(command)}")
                     try:
                         output, _ = child.communicate(timeout=min(0.2, remaining))
                         break
@@ -85,8 +89,8 @@ class ComponentHost:
             self.check_interrupt()
         return output
 
-    def document(self, *command, cleanup=False):
-        value = json.loads(self.command(self.dcomp + list(command), cleanup=cleanup))
+    def document(self, *command, cleanup=False, timeout=120):
+        value = json.loads(self.command(self.dcomp + list(command), cleanup=cleanup, timeout=timeout))
         if not isinstance(value, dict) or value.get("api_version") != 2:
             raise LaunchError("asys requires dcomp 0.3 (Machine API 2)")
         return value
