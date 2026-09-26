@@ -198,6 +198,14 @@ test('real browser: unified views, isolated execution controls, replay and rende
   await cdp.send('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false},sessionId);
   await cdp.send('Page.navigate',{url:`http://127.0.0.1:${server.address().port}/`},sessionId);
   await waitFor('document.querySelectorAll("#runs tr").length===2');
+  await evaluate('for (const [key,value] of [["activity","history"],["kind","swarm"]]) {const select=document.querySelector("#"+key+"-filter");select.value=value;select.dispatchEvent(new Event("change"));}');
+  assert.equal(await evaluate('new URL(location.href).searchParams.get("activity")'),'history');
+  assert.equal(await evaluate('new URL(location.href).searchParams.get("kind")'),'swarm');
+  await cdp.send('Page.reload',{},sessionId);
+  await waitFor('document.querySelector("#activity-filter")?.value==="history" && document.querySelector("#kind-filter")?.value==="swarm"');
+  await evaluate('for (const [key,value] of [["activity","all"],["kind",""]]) {const select=document.querySelector("#"+key+"-filter");select.value=value;select.dispatchEvent(new Event("change"));}');
+  assert.equal(await evaluate('new URL(location.href).searchParams.get("activity")'),'all');
+  assert.equal(await evaluate('new URL(location.href).searchParams.has("kind")'),false);
   await evaluate('document.querySelector("#system-filter").value="lab";document.querySelector("#system-filter").dispatchEvent(new Event("change"))');
   assert.equal(await evaluate('new URL(location.href).searchParams.get("system")'),'lab');
   await cdp.send('Page.reload',{},sessionId);

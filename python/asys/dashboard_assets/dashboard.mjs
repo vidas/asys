@@ -931,12 +931,18 @@ export function startDashboard(document, window) {
       if (state.pending) { state.pending = false; refresh(true); }
     }
   }
+  const savedFilters = new URL(window.location.href).searchParams;
+  for (const key of ['activity', 'kind']) {
+    const select = $('#' + key + '-filter'), value = savedFilters.get(key);
+    if ([...select.options].some(option => option.value === value)) select.value = value;
+  }
   $('#filters').addEventListener('submit', event => event.preventDefault());
-  $('#system-filter').addEventListener('change',event=>{
-    state.systemFilter=event.target.value;
-    const url=new URL(window.location.href);
-    if(state.systemFilter)url.searchParams.set('system',state.systemFilter);else url.searchParams.delete('system');
-    window.history.replaceState(null,'',url);
+  for (const key of ['system', 'activity', 'kind']) $('#' + key + '-filter').addEventListener('change',event=>{
+    const value = event.target.value;
+    if (key === 'system') state.systemFilter = value;
+    const url = new URL(window.location.href);
+    if (value) url.searchParams.set(key, value); else url.searchParams.delete(key);
+    window.history.replaceState(null, '', url);
   });
   for (const id of ['system-filter', 'activity-filter', 'kind-filter', 'search']) $( '#' + id).addEventListener(id === 'search' ? 'input' : 'change', renderRuns);
   $('#close-run').addEventListener('click', () => selectRun(null));
