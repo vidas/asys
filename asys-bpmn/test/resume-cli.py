@@ -370,8 +370,10 @@ class Resume(unittest.TestCase):
         components = [{'name': name, 'status': {'status': 'running', 'health': 'healthy'}} for name in names]
         with patch.object(self.launcher, 'document', return_value={'components': components}), \
                 patch.object(self.launcher, 'start_components') as start, \
+                patch.object(self.launcher, 'reattach_request', return_value={'status': 'completed', 'active': False}) as probe, \
                 patch.object(self.launcher, 'refresh_environment') as refresh:
             self.launcher.setup()
+        probe.assert_called_once_with('status')
         start.assert_not_called()
         refresh.assert_not_called()
         self.assertTrue(self.launcher.reattaching)
@@ -381,6 +383,8 @@ class Resume(unittest.TestCase):
         event = writer.send('activity.start', {'store': 1, 'runId': 'abc123', 'activityId': 'work',
                             'time': '2026-09-14T10:01:00Z', 'data': {'name': 'Work'}})
         module['Reader'](writer.directory).advance(event['sequence'])
+        # A reply to the previous launcher can remain queued after it exited.
+        writer.send('accepted', {'request': 99, 'runId': 'abc123', 'workflowId': 'saved'})
         writer.send('run.result', {'runId': 'abc123', 'status': 'completed', 'output': {'work': 42}})
         with patch.object(module['Writer'], 'send') as send:
             self.launcher.execute()

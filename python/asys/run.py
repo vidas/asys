@@ -33,7 +33,7 @@ def arguments(argv):
     parser.add_argument('worker', nargs='?', metavar='WORKER|WORKFLOW.bpmn')
     parser.add_argument('request', nargs='?', metavar='REQUEST')
     parser.add_argument('--input', metavar='FILE', help='read the Markdown request from a file; - reads stdin')
-    parser.add_argument('--resume', metavar='RUN', help='resume a failed workflow using its saved definition and environment')
+    parser.add_argument('--resume', metavar='RUN', help='resume a failed or recovery-required workflow using its saved state')
     parser.add_argument('--model', metavar='MODEL', help='override a named worker model for this run')
     parser.add_argument('--parameters', type=Path, metavar='FILE', help='JSON parameters accepted by a named worker')
     parser.add_argument('--name', metavar='NAME', help='name displayed for this run')

@@ -13,7 +13,7 @@ from asys_runtime.environment import Environment
 from asys_runtime.permissions import mkdir, shared
 from asys_runtime.files import read_json, timestamp, write_json
 from .state import state_root
-from .lifecycle import LaunchError, Interrupted
+from .lifecycle import LaunchError, Interrupted, RecoveryRequired
 from .execution import EnvironmentHost, execution_options, prepare_run
 from .human import HumanHandler
 from .workflow_runs import Runs, component_names, workflow_name
@@ -21,7 +21,7 @@ from .workflow_journal import WorkflowHistory, agent_notices
 
 SERVICE = "asys.workflow.v1.Workflow"
 CHANNEL = "workflow"
-TERMINAL = {"completed", "failed", "cancelled"}
+TERMINAL = {"completed", "failed", "cancelled", "recovery-required"}
 
 
 def read_object(path):
@@ -32,6 +32,8 @@ def read_object(path):
 
 
 class Launcher(EnvironmentHost):
+    REATTACH_TIMEOUT = 10
+
     def __init__(self, args):
         super().__init__(args)
         self.active = False
@@ -43,6 +45,7 @@ class Launcher(EnvironmentHost):
         self.save_record = args.command != "resume"
         self.human = None
         self.console_errors = []
+        self.reattach_result = None
 
     def say(self, message):
         if self.directory is not None:
@@ -125,8 +128,8 @@ class Launcher(EnvironmentHost):
             raise LaunchError("This run already has an active launcher") from None
         self.lease = lease
         record = read_object(directory / "run.json")
-        if record.get("status") != "failed":
-            raise LaunchError(f"Cannot resume a {record.get('status', 'unknown')} run; select a failed run")
+        if record.get("status") not in {"failed", "recovery-required"}:
+            raise LaunchError(f"Cannot resume a {record.get('status', 'unknown')} run; select a failed or recovery-required run")
         if not (directory / "workflow/workflow.sqlite").is_file():
             raise LaunchError("This run has no saved BPMN execution state")
         if not (directory / "environment/component.dcomp").is_file():
@@ -150,14 +153,39 @@ class Launcher(EnvironmentHost):
             if set(components) != set(names):
                 raise LaunchError("Some previous run components are missing; finish their cleanup before resuming")
             # Adopt only the complete, healthy saved execution, under its
-            # launcher lease. Do not send resume or replace active jobs.
+            # launcher lease. Heartbeat alone does not establish that an
+            # --await-resume engine has recovered its workflow.
             self.check_components(components, names=names)
             if any(item['status'].get('status') != 'running' or
                    item['status'].get('health') not in {'healthy', 'none'} for item in components.values()):
                 raise LaunchError("Previous run components are not ready; finish recovery before reattaching")
-            if self.args.human:
-                raise LaunchError("Reattach without --human; use asys-human-prompt for human requests")
+            if self.args.human and 'human' not in self.names:
+                raise LaunchError('This execution uses the shared Human service; attach with asys-human-prompt')
             self.owned = names
+            self.save_record = True
+            self.preserve_components = True
+            try:
+                state = self.reattach_request('status')
+                if state['status'] not in {'completed', 'failed', 'cancelled'} and not state['active']:
+                    self.record['status'] = 'recovering'
+                    self.snapshot()
+                    self.say('Recovering the saved workflow in its existing engine; running job IDs are retained')
+                    state = self.reattach_request('recover')
+                if state['status'] not in {'completed', 'failed', 'cancelled'} and not state['active']:
+                    raise LaunchError('Engine has no active workflow after checkpoint recovery')
+                self.reattach_result = state.get('result')
+            except (LaunchError, OSError, ValueError, KeyError) as error:
+                self.require_health_recovery(self.names['engine'],
+                    f'Cannot reattach safely: {error}. Restore the engine/status channel, then retry asys-run --resume {self.id}; do not replay a job-replacing resume request')
+            if self.args.human:
+                self.human = HumanHandler(self, self.names['human'])
+                try:
+                    self.human.start(attach=True)
+                except (LaunchError, OSError, ValueError) as error:
+                    self.require_health_recovery(self.names['human'], f'Could not attach the preserved Human handler: {error}')
+            elif 'human' in self.names:
+                self.say(f"Private Human service retained; attach with asys-human-prompt --private --name {self.names['human']} --root {self.args.root} --system {self.args.system}")
+            self.preserve_components = False
             self.reattaching = True
             self.say(f"Reattaching to live run {self.id} without restarting its jobs")
             return
@@ -166,6 +194,33 @@ class Launcher(EnvironmentHost):
         self.refresh_environment()
         (directory / "engine/component.dcomp").write_text(f"docker {engine_id}\noutput {SERVICE} workflow\n")
         self.start_components()
+
+    def reattach_request(self, kind):
+        """Probe/recover an existing engine without consuming workflow events."""
+        outbound = Reader(direction_root(self.directory / 'runtime', CHANNEL, 'out'))
+        after = max(outbound.sequences(), default=0)
+        request = Writer(direction_root(self.directory / 'runtime', CHANNEL, 'in')).send(kind, {'id': self.id})
+        deadline = time.monotonic() + self.REATTACH_TIMEOUT
+        while time.monotonic() < deadline:
+            self.check_interrupt()
+            for event in outbound.read(after):
+                after = event['sequence']
+                data = event['data']
+                if data.get('request') != request['sequence']:
+                    continue
+                if event['type'] == 'rejected':
+                    raise LaunchError(f"Engine {kind} request rejected: {data.get('message', data)}")
+                if event['type'] == 'accepted':
+                    if (data.get('runId') != self.id or type(data.get('active')) is not bool
+                            or data.get('status') not in {'running', 'waiting', 'resuming', 'completed', 'failed', 'cancelled'}):
+                        raise LaunchError(f'Invalid engine {kind} response')
+                    if data['status'] in {'completed', 'failed', 'cancelled'}:
+                        result = data.get('result')
+                        if not isinstance(result, dict) or result.get('runId') != self.id or result.get('status') != data['status']:
+                            raise LaunchError(f'Engine {kind} response omitted its terminal result')
+                    return data
+            self.interrupted.wait(0.05)
+        raise LaunchError(f'Engine did not answer {kind} within {self.REATTACH_TIMEOUT}s; heartbeat alone is not execution readiness')
 
     def refresh_environment(self):
         environment = Path(self.record["environment_directory"]).expanduser().resolve()
@@ -189,12 +244,12 @@ class Launcher(EnvironmentHost):
         self.names['human'] = name
         return f'{name}.human'
 
-    def stop_human(self):
+    def stop_human(self, *, preserve=False):
         if self.human is None:
             return True
         handler, self.human = self.human, None
         try:
-            return handler.close()
+            return handler.close(preserve=True) if preserve else handler.close()
         finally:
             for message in self.console_errors:
                 print(message, file=sys.stderr, flush=True)
@@ -205,6 +260,7 @@ class Launcher(EnvironmentHost):
             self.human = HumanHandler(self, self.names['human'])
             self.human.start()
         self.start_workers()
+        self.record['engine_await_resume'] = self.args.command == 'resume'
         self.add("engine", "engine", self.execution_mounts() + [
             "--bind", f"{self.directory / 'workflow'},/var/lib/asys-bpmn,rw",
             "--arg=--host-channel", f"--arg={CHANNEL}",
@@ -212,6 +268,32 @@ class Launcher(EnvironmentHost):
         self.wait_ready()
         self.snapshot()
         self.say(f"Workflow channel: {self.channel}")
+
+    def recover_unhealthy_component(self, name, status):
+        if name != self.names.get('engine'):
+            return super().recover_unhealthy_component(name, status)
+        # Older resumed engines also retain --await-resume on restart. Sending
+        # resume again would cancel running jobs and create replacements.
+        if self.record.get('engine_await_resume', bool(self.record.get('resumed_at'))):
+            self.require_health_recovery(name, 'This engine awaits explicit resume on restart; preserving its running jobs requires operator recovery')
+        if not (self.directory / 'workflow/workflow.sqlite').is_file():
+            self.require_health_recovery(name, 'No saved workflow checkpoint is available for engine recovery')
+        attempts = self.record.setdefault('health_restarts', {})
+        if attempts.get(name, 0) >= self.HEALTH_RESTART_LIMIT:
+            self.require_health_recovery(name, 'Automatic engine restart limit reached')
+        attempts[name] = attempts.get(name, 0) + 1
+        self.record['component_health'][name].update(state='restarting', attempt=attempts[name])
+        if not self._publish_health():
+            self.require_health_recovery(name, 'Could not persist the engine restart budget; automatic restart was not attempted')
+        self._record_component_health(name, status, inspect=True, action='restart', attempt=attempts[name])
+        self._health_notice(f'Restarting unhealthy workflow engine {name}; running worker jobs remain attached to their existing IDs')
+        try:
+            self.command(self.dcomp + ['restart', self.args.system, name], timeout=120)
+        except Interrupted:
+            raise
+        except (LaunchError, OSError, ValueError) as error:
+            self.require_health_recovery(name, f'Targeted engine restart failed: {error}')
+        self._health_restart_deadline[name] = time.monotonic() + self.HEALTH_RESTART_READY
 
     def events(self, after):
         """Channel events past `after`, and the sequence of the last one."""
@@ -225,6 +307,14 @@ class Launcher(EnvironmentHost):
         self.record["workflow_id"] = run.get("workflowId")
         write_json(self.directory / "result.json", run)
         return run
+
+    def report_result(self, event):
+        run = self.finish(event)
+        if not self.stop_human():
+            raise LaunchError('Human handler cleanup failed')
+        if run['status'] != 'completed':
+            raise LaunchError(run.get('error') or f"Workflow {run['status']}")
+        print(json.dumps(run.get('output', {}), indent=2, ensure_ascii=False))
 
     def execute(self):
         inbound = Writer(direction_root(self.directory / "runtime", CHANNEL, "in"))
@@ -255,6 +345,7 @@ class Launcher(EnvironmentHost):
         self.record["components_removed"] = False
         self.record.pop("error", None)
         self.record.pop("finished_at", None)
+        self.record.pop("component_health", None)
         self.snapshot()
         action = "Monitoring" if self.reattaching else "Resuming" if resuming else "Running"
         self.say(f"{action} {self.record['workflow']} in {self.record['environment']}")
@@ -271,10 +362,10 @@ class Launcher(EnvironmentHost):
                 events, after = self.events(after)
                 for event in events:
                     data = event["data"]
-                    if event["type"] == "rejected" and data.get("request") == self.request["sequence"]:
+                    if event["type"] == "rejected" and self.request and data.get("request") == self.request["sequence"]:
                         self.active = False
                         raise LaunchError(f"{self.request['type']}: {data.get('message', data)}")
-                    if event["type"] == "accepted" and data.get("request") == self.request["sequence"]:
+                    if event["type"] == "accepted" and self.request and data.get("request") == self.request["sequence"]:
                         self.record["workflow_id"] = data["workflowId"]
                         self.snapshot()
                     if "activityId" in data:  # A run event, mirrored in the engine's own numbering.
@@ -298,17 +389,17 @@ class Launcher(EnvironmentHost):
                         agent_progress()
                         events_file.flush()
                         self.outbound.advance(event["sequence"])
-                        run = self.finish(event)
-                        if not self.stop_human():
-                            raise LaunchError('Human handler cleanup failed')
-                        if run["status"] != "completed":
-                            raise LaunchError(run.get("error") or f"Workflow {run['status']}")
-                        print(json.dumps(run.get("output", {}), indent=2, ensure_ascii=False))
+                        self.report_result(event)
                         return
                 events_file.flush()
                 agent_progress()
                 if events:
                     self.outbound.advance(after)
+                if self.reattach_result is not None:
+                    # A former launcher may already have consumed/pruned the
+                    # result event. The fresh status reply carries durable data.
+                    self.report_result({'data': self.reattach_result})
+                    return
                 if time.monotonic() >= next_health_check:
                     if self.human:
                         self.human.check()
@@ -321,10 +412,11 @@ class Launcher(EnvironmentHost):
             if self.lease:
                 self.lease.close()
             return True
+        cancelled = self.record.get('status') == 'cancelled' or self.interrupted.is_set()
         # Only an explicit interruption cancels BPMN execution. On component
         # failure, preserve its last checkpoint for resume, even if the engine
         # has not yet observed the worker's failure.
-        if self.active and self.outbound is not None and self.record.get("status") == "cancelled":
+        if self.active and self.outbound is not None and cancelled:
             try:
                 Writer(direction_root(self.directory / "runtime", CHANNEL, "in")).send("cancel", {"id": self.id})
                 after, deadline = self.outbound.cursor, time.monotonic() + 5
@@ -340,6 +432,13 @@ class Launcher(EnvironmentHost):
                     self.say("The workflow component did not confirm the cancellation in time")
             except Exception as error:
                 self.say(f"Could not cancel through the workflow channel: {error}")
+        if self.preserve_components and not cancelled:
+            clean = self.stop_human(preserve=True)
+            self.record['components_removed'] = False
+            saved = self._publish_health()
+            if self.lease:
+                self.lease.close()
+            return clean and saved
         clean = self.stop_human()
         clean = self.cleanup_components() and clean
         self.record["components_removed"] = clean
@@ -368,7 +467,7 @@ def run(args):
         code = 130
     except (LaunchError, OSError, ValueError, KeyError) as error:
         launcher.say(f"error: {error}")
-        launcher.record.update(status="failed", error=str(error))
+        launcher.record.update(status="recovery-required" if isinstance(error, RecoveryRequired) else "failed", error=str(error))
         code = 1
     finally:
         try:

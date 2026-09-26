@@ -47,14 +47,7 @@ export class Store {
   runs() { return this.db.prepare('SELECT record FROM runs ORDER BY rowid DESC').all().map(r => JSON.parse(r.record)); }
   save(record, events = []) {
     const serialized = JSON.stringify(record);
-    this.db.exec('BEGIN IMMEDIATE');
-    try {
-      this.db.prepare('INSERT INTO runs VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET status=excluded.status, record=excluded.record')
-        .run(record.id, record.workflowId, record.status, serialized);
-      const insert = this.db.prepare('INSERT INTO events (run_id, type, activity_id, time, data) VALUES (?, ?, ?, ?, ?)');
-      for (const event of events) insert.run(record.id, event.type, event.activityId ?? '', event.time ?? new Date().toISOString(), JSON.stringify(event.data ?? {}));
-      this.db.exec('COMMIT');
-    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    commitRun(this.db, record, serialized, events);
     for (const listener of this.listeners) listener();
   }
   events(runId, after = 0, limit = 100) {
@@ -69,4 +62,18 @@ export class Store {
   // whatever the store now holds, so a missed call costs nothing.
   subscribe(listener) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   close() { this.db?.close(); this.owner?.close(); }
+}
+
+export function commitRun(db, record, serialized, events) {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare('INSERT INTO runs VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET status=excluded.status, record=excluded.record')
+        .run(record.id, record.workflowId, record.status, serialized);
+      const insert = db.prepare('INSERT INTO events (run_id, type, activity_id, time, data) VALUES (?, ?, ?, ?, ?)');
+      for (const event of events) insert.run(record.id, event.type, event.activityId ?? '', event.time ?? new Date().toISOString(), JSON.stringify(event.data ?? {}));
+      db.exec('COMMIT');
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch { /* Preserve the original write error. */ }
+      throw error;
+    }
 }

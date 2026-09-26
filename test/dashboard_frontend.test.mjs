@@ -18,10 +18,14 @@ test('overview filters preserve named worker identity and distinguish history', 
   assert.deepEqual(filteredRuns(rows,{activity:'history'}),[rows[1]]);
   assert.equal(active('paused'),true);
   assert.equal(active('interrupted'),false);
+  assert.equal(active('recovery-required'),false);
+  assert.equal(active('recovering'),true);
+  assert.equal(active('degraded'),true);
   assert.equal(kindOf({job:{type:'repair'},worker:{kind:'goal'}}),'goal');
   assert.equal(kindOf({job:{type:'custom-script'}}),'program');
   assert.equal(needsAttention({status:'running',activity:'waiting for human help'}),true);
   assert.equal(needsAttention({status:'detached'}),true);
+  for(const status of ['degraded','recovering','recovery-required']) assert.equal(needsAttention({status}),true);
   assert.deepEqual(filteredRuns([{id:'a',kind:'swarm',status:'failed'},{id:'b',kind:'goal',status:'running'}],
     {kind:'swarm',activity:'attention'}).map(run=>run.id),['a']);
 });

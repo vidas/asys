@@ -57,10 +57,28 @@ export async function serveHostChannel(runtime, { root, name = 'workflow', signa
     await outbound.send('run.result', { runId, status: record.status, error: record.error?.message ?? '',
       output: record.output, variables: record.variables, environment: record.environment, workflowId: record.workflowId, store });
   }
+  function runStatus(run) {
+    const status = { runId: run.id, workflowId: run.workflowId, status: run.status, active: runtime.active.has(run.id) };
+    if (['completed', 'failed', 'cancelled'].includes(run.status)) {
+      // Reattachment can occur after a former launcher consumed/pruned the
+      // terminal event. Supply the same durable result without replaying it.
+      status.result = { runId: run.id, workflowId: run.workflowId, status: run.status,
+        error: run.error, output: JSON.parse(run.outputJson), variables: JSON.parse(run.variablesJson), environment: run.environment };
+    }
+    return status;
+  }
   async function handle(event) {
     const { data } = event;
     if (!data || typeof data !== 'object') throw new ConnectError('Request data must be an object', Code.InvalidArgument);
     switch (event.type) {
+      case 'status': {
+        const { run } = runtime.getRun({ id: data.id });
+        return runStatus(run);
+      }
+      case 'recover': {
+        const { run } = await runtime.recoverRun({ id: data.id });
+        return runStatus(run);
+      }
       case 'start': {
         if (data.environmentDefinition !== undefined) {
           const descriptor = await runtime.environments.get(data.environment);

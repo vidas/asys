@@ -7,7 +7,7 @@ import sys
 from asys_runtime.files import timestamp, write_json
 from asys_runtime.queue import TERMINAL
 from .execution import EnvironmentHost
-from .lifecycle import Interrupted, LaunchError
+from .lifecycle import Interrupted, LaunchError, RecoveryRequired
 
 
 class SingleJob(EnvironmentHost):
@@ -28,7 +28,7 @@ class SingleJob(EnvironmentHost):
     def snapshot(self):
         if self.directory:
             self.record['updated_at'] = timestamp()
-            if self.record.get('status') in {'completed', 'failed', 'cancelled'}:
+            if self.record.get('status') in {'completed', 'failed', 'cancelled', 'recovery-required'}:
                 self.record.setdefault('finished_at', self.record['updated_at'])
             write_json(self.directory / 'run.json', self.record)
 
@@ -42,6 +42,9 @@ class SingleJob(EnvironmentHost):
 
     def close(self):
         try:
+            if self.preserve_components and self.record.get('status') != 'cancelled' and not self.interrupted.is_set():
+                self.record['components_removed'] = False
+                return self._publish_health()
             if self.queue and self.job_id:
                 try:
                     state = self.queue.cancel(self.job_id)
@@ -79,7 +82,7 @@ def run(launcher):
             launcher.event('run.cancelled', jobId=launcher.job_id)
         code = 130
     except (LaunchError, OSError, ValueError) as error:
-        launcher.record.update(status='failed', error=str(error))
+        launcher.record.update(status='recovery-required' if isinstance(error, RecoveryRequired) else 'failed', error=str(error))
         launcher.say(f'error: {error}')
         code = 1
     finally:

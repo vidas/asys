@@ -82,9 +82,55 @@ Interrupting a run requests cancellation and removal of its owned components.
 If cleanup is incomplete, inspect saved diagnostics and the selected dcomp
 system. Shared inference and unrelated components belong to their own owners.
 
-If a failed launcher's complete set of saved components is still healthy,
+If a failed or `recovery-required` launcher's complete set of saved components is still healthy,
 `asys-run --resume RUN` reattaches to that execution without restarting jobs.
+Reattachment sends a read-only engine status query and requires an active workflow
+or a terminal result, not just a healthy heartbeat. If an engine was manually
+restarted in await-resume mode, explicit `--resume` requests checkpoint recovery
+that retains existing job IDs; it does not replay the job-replacing resume
+operation. Each status/recovery reply has a 10-second deadline. Rejected,
+unsupported or missing replies leave the run `recovery-required` with its
+components preserved. Restore the engine/channel, then retry `--resume`.
 Partial component cleanup must be finished before a checkpoint restart.
 A timeout reading shared dcomp status is logged and retried; it does not fail
-unrelated active runs or trigger their cleanup. Actual component failures
-still fail their owning run.
+unrelated active runs or trigger their cleanup. During active execution, a
+running component whose healthcheck becomes unhealthy puts the run in `degraded`
+status. Its jobs continue during a 60-second grace period. A healthy observation
+clears the degradation. `asys status RUN` and its JSON output expose the current
+health state. The launcher logs state transitions without repeating each poll.
+`component-health.jsonl` retains timestamped observations, recovery decisions
+and a bounded, best-effort Docker state capture with recent healthcheck results.
+This history remains after normal component cleanup. Diagnostic capture failures
+do not fail the run.
+
+After the grace period, the launcher can restart only the workflow engine using
+`dcomp ... restart SYSTEM ENGINE`. It requires a saved checkpoint and preserves
+the existing worker/world components and job IDs. The run reports `recovering`
+before invoking dcomp. That command has a 120-second timeout; after it returns,
+the engine has 90 seconds to become healthy. The engine's ordinary startup
+recovery restores its checkpoint. At most one automatic restart is allowed per
+saved run, including across launcher reattachment. A healthy observation after
+restart returns the run to `running`; a recurring fault cannot cause a restart loop.
+
+Persistent worker/world health failures are not automatically restarted because
+doing so interrupts their jobs. Engines started with `--await-resume` also require
+operator recovery: replaying resume could cancel and replace running jobs. A
+missing checkpoint, exhausted restart budget, failed restart or expired recovery
+deadline ends the launcher with exit status 1 and run status `recovery-required`.
+The workflow engine, workers, worlds, jobs and checkpoints remain in place for
+inspection. A private `--human` terminal handler releases its active claim and
+detaches while keeping its Human component and pending requests. Reattach it with
+`asys-run --resume RUN --human`, or use `asys-human-prompt --private --name COMPONENT`
+with the saved root/system after restoring the execution. Only a matching saved,
+preserved private service can be adopted; an existing handler lease excludes a
+second terminal. Inspect the saved health evidence, component logs and job progress before
+intervening; healthy complete executions can be reattached as described above.
+Standalone worker runs have no workflow resume operation and require direct
+inspection and operator cleanup of their retained components.
+
+An unavailable status read cannot extend a known unhealthy component's deadline.
+Startup and reattachment still require their existing readiness checks. Confirmed
+component exit, death, disappearance or a reported component problem still fails
+its owning run immediately. During engine recovery these failures retain the
+remaining components; otherwise normal cleanup applies. Explicit interruption
+still cancels work and requests cleanup.

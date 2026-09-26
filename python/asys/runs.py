@@ -14,7 +14,7 @@ import time
 
 from .state import state_root
 
-TERMINAL = {"completed", "failed", "cancelled"}
+TERMINAL = {"completed", "failed", "cancelled", "recovery-required"}
 JOB_TERMINAL = {"done", "failed", "cancelled", "interrupted"}
 
 
@@ -260,6 +260,8 @@ def status(args):
         print(f"{role}: {name}")
     if record.get("error"):
         print(f"Error: {record['error']}")
+    for name, health in record.get('component_health', {}).items():
+        print(f"Health: {name}: {health['state']} (since {health.get('since', 'unknown')})")
     if record.get("status") == "detached":
         print(f"Launcher exited; last reported run status: {record['reported_status']}. Components may still be running.")
     if record["jobs"]:

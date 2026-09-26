@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import signal
 import sys
+import tempfile
 import time
 import uuid
 
@@ -36,7 +37,7 @@ class UpdateRequested(Exception):
 def arguments(argv):
     parser = argparse.ArgumentParser(prog="asys-human-prompt", description="Answer worker human requests, one at a time.", allow_abbrev=False)
     parser.add_argument("--private", action="store_true", help="export only COMPONENT.human, without binding @human_endpoint")
-    parser.add_argument("--name", help="dcomp component name (default: generated)")
+    parser.add_argument("--name", help="dcomp component name; with --private, also reconnect to a retained service")
     parser.add_argument("--claimant", default=getpass.getuser(), help="human identity for candidate checks (default: login name)")
     parser.add_argument("--root", type=Path, default=state_root(),
                         metavar="DIRECTORY", help=ROOT_HELP)
@@ -94,6 +95,11 @@ class Launcher(ComponentHost):
         if not self.args.private:
             self.setup_shared()
             return
+        if self.args.name:
+            component = self.existing_private_component()
+            if component is not None:
+                self.setup_attached(component)
+                return
         root = state_root('human', root=self.args.root).resolve()
         if "," in str(root):
             raise LaunchError("The state path cannot contain a comma (dcomp mount syntax)")
@@ -128,52 +134,123 @@ class Launcher(ComponentHost):
         self.attach()
         self.say(f'Human endpoint: {self.name}.human. Ctrl-C to stop.')
         self.next_discovery = time.monotonic() + 2
+        self.attached()
+
+    @staticmethod
+    def component_runtime(component):
+        runtime = next((Path(bind['source']) for bind in component.get('binds', [])
+                        if bind['target'] == '/var/lib/asys-human'), None)
+        if runtime is None:
+            raise LaunchError('Human component has no host channel mounted for the terminal')
+        return runtime.expanduser().resolve(strict=True)
+
+    def validate_private_session(self, component, saved):
+        expected = {'version': 1, 'system': self.args.system, 'component': component['name'],
+                    'endpoint': component['name'] + '.human', 'dcomp': self.dcomp, 'global': None, 'persistent': True}
+        if (not isinstance(saved, dict) or any(saved.get(key) != value for key, value in expected.items())
+                or saved.get('component_removed') is not False):
+            raise LaunchError('Private Human session does not match the selected component, system and dcomp installation')
+
+    def existing_private_component(self):
+        # Resolve the live component before trusting or writing its saved session.
+        with tempfile.TemporaryDirectory(prefix='asys-human-attach-') as temporary:
+            self.directory = Path(temporary)
+            try:
+                document = self.view()
+            finally:
+                self.directory = None
+        if document.get('operation'):
+            raise LaunchError(f'dcomp system {self.args.system} has a pending operation')
+        return next((item for item in document['components'] if item['name'] == self.args.name), None)
+
+    def setup_attached(self, component):
+        self.check_components({component['name']: component}, [component['name']])
+        if (component['status'].get('status') != 'running'
+                or component['status'].get('health') not in {'healthy', 'none'}):
+            raise LaunchError('Private Human component is not ready for attachment')
+        if not any(item.get('name') == 'human' and item.get('service') == SERVICE
+                   for item in component.get('outputs', [])):
+            raise LaunchError('Selected component does not export the Human service')
+        runtime = self.component_runtime(component)
+        self.validate_private_session(component, json.loads((runtime.parent / 'session.json').read_text()))
+        self.attach_terminal(component, runtime, private=True)
 
     def setup_shared(self):
         component = ensure_human(self, name=self.args.name)
         if self.args.name and component['name'] != self.args.name:
             raise LaunchError(f"@human_endpoint is already provided by {component['name']}; use --private for a separate service")
-        runtime = next((Path(bind['source']) for bind in component.get('binds', [])
-                        if bind['target'] == '/var/lib/asys-human'), None)
-        if runtime is None:
-            raise LaunchError('@human_endpoint has no host channel mounted for the terminal')
+        self.attach_terminal(component, self.component_runtime(component))
+
+    def attach_terminal(self, component, runtime, *, private=False):
         directory = runtime.parent
         lease = os.fdopen(open_file(directory / 'handler.lock', os.O_CREAT | os.O_RDWR), 'a+b')
         try:
             fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             lease.close()
-            raise LaunchError('A terminal is already attached to @human_endpoint') from None
+            raise LaunchError(f"A terminal is already attached to {component['name']}.human") from None
+        try:
+            previous = directory / 'session.json'
+            saved = json.loads(previous.read_text()) if previous.is_file() else {}
+            if private:
+                self.validate_private_session(component, saved)
+        except BaseException:
+            lease.close()
+            raise
         self.lease = lease
         self.directory, self.runtime = directory, runtime
         self.name = component['name']
+        self.args.private = private
         self.persistent = True
         self.channel = Channel(runtime, self.args.claimant, self.say)
         self.control = Reader(direction_root(directory, 'control', 'in'))
         self.control_output = Writer(direction_root(directory, 'control', 'out'))
         state = directory / 'service.json'
         service = json.loads(state.read_text()) if state.is_file() else {}
-        self.image_ref = service.get('image_ref', 'asys-human-interface:dev')
+        self.image_ref = saved.get('image_ref') or service.get('image_ref', 'asys-human-interface:dev')
         self.image = component['image_id']
-        previous = directory / 'session.json'
-        if previous.is_file():
-            saved = json.loads(previous.read_text())
-            self.active = saved.get('active')
-            if self.active:
-                self.active.setdefault('claimant', saved['claimant'])
-                try:
-                    self.release(cleanup=True)
-                except RPCError as error:
-                    if error.code not in {'FailedPrecondition', 'NotFound'}:
-                        raise
-                    self.active = None
+        self.active = saved.get('active')
+        if self.active:
+            self.active.setdefault('claimant', saved['claimant'])
+        # The former handler may have exited after persisting detach but before
+        # acknowledging it. Retain its claim until release below, and do not
+        # apply its detach request to this new terminal.
+        self.pending_detach()
+        if self.active:
+            try:
+                self.release(cleanup=True)
+            except RPCError as error:
+                if error.code not in {'FailedPrecondition', 'NotFound'}:
+                    raise
+                self.active = None
         self.channel.pump()
         self.channel.discover(lambda: self.tick(cleanup=True))
         self.save()
         self.view()
         self.say(f'Human handler state: {directory}')
-        self.say('Human endpoint: @human_endpoint. Ctrl-C to detach; the service keeps running.')
+        endpoint = f'{self.name}.human' if private else '@human_endpoint'
+        self.say(f'Human endpoint: {endpoint}. Ctrl-C to detach; the service keeps running.')
         self.next_discovery = time.monotonic() + 2
+        self.attached()
+
+    def attached(self):
+        self.control_output.send('attached', {'component': self.name, 'pid': os.getpid(),
+                                             'attachment': os.environ.get('ASYS_HUMAN_ATTACHMENT')})
+
+    def detach(self, event):
+        # Persist retention before advancing the control cursor: SIGTERM can
+        # interrupt the terminal between any two of these operations.
+        self.persistent = True
+        self.owned = []
+        self.save()
+        self.control_output.send('detached', {'request': event['sequence'], 'component': self.name})
+        self.control.advance(event['sequence'])
+
+    def pending_detach(self):
+        if self.control:
+            for event in self.control.read():
+                if event['type'] == 'detach':
+                    self.detach(event)
 
     def update_component(self, event):
         try:
@@ -234,6 +311,9 @@ class Launcher(ComponentHost):
         self.channel.pump()
         if not cleanup and self.control:
             for event in self.control.read():
+                if event['type'] == 'detach':
+                    self.detach(event)
+                    raise Quit()
                 self.control.advance(event['sequence'])
                 if event['type'] == 'update' and event['data'].get('image') != self.image:
                     raise UpdateRequested(event)
@@ -358,6 +438,9 @@ class Launcher(ComponentHost):
     def close(self):
         if self.directory is None:
             return True
+        # Honor a durable detach request even when a signal prevented tick()
+        # from observing it before shutdown.
+        self.pending_detach()
         clean = True
         if self.active and (self.owned or self.persistent):
             try:

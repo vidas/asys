@@ -1,11 +1,15 @@
 import { join } from 'node:path';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
-import { groupModels, streamProvider } from './provider-adapter.mjs';
+import { groupModels, listProviderModels, streamProvider } from './provider-adapter.mjs';
 
 // Register the endpoint's public catalogue while preserving native model identities
 // inside Provider messages. Pi uses the public route for every request, including compaction.
 export async function agentModel({ config, agentDir, provider: providerClient, signal, event, beforeRequest }) {
-  const catalogue = await providerClient.listModels({}, { signal, timeoutMs: 10000 });
+  const recovery = {
+    onExhaustion: ({ retryAt, ...data }) => event('agent.provider_exhausted', { ...data, retryAt: retryAt.toISOString() }),
+    onRetry: ({ retryAt, ...data }) => event('agent.provider_retrying', { ...data, retryAt: retryAt.toISOString() }),
+  };
+  const catalogue = await listProviderModels(providerClient, { signal }, recovery);
   const groups = groupModels(catalogue.models, { onInvalid: message => event('agent.model_unavailable', { message }) });
   const modelRuntime = await ModelRuntime.create({ authPath: join(agentDir, 'auth.json'), modelsPath: null, allowModelNetwork: false, signal });
   let selected;
@@ -24,9 +28,7 @@ export async function agentModel({ config, agentDir, provider: providerClient, s
         return streamProvider(providerClient, route.publicId, { ...model, api: 'cyclo-pi' }, context,
           { ...options, ...config.options,
             signal: AbortSignal.any([signal, ...(options.signal ? [options.signal] : [])]) },
-          { idleTimeoutMs: config.inferenceIdleTimeoutMs,
-            onExhaustion: ({ retryAt, ...data }) => event('agent.provider_exhausted', { ...data, retryAt: retryAt.toISOString() }),
-            onRetry: ({ retryAt, ...data }) => event('agent.provider_retrying', { ...data, retryAt: retryAt.toISOString() }) });
+          { idleTimeoutMs: config.inferenceIdleTimeoutMs, ...recovery });
       },
     });
     for (const route of routes) if (route.publicId === config.model) selected = modelRuntime.getModel(provider, route.model.id);

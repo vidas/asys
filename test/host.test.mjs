@@ -44,6 +44,10 @@ test('host lifecycle owns process groups, component cleanup, and diagnostics', a
   await exec('python3', [fileURLToPath(new URL('./lifecycle.py', import.meta.url))]);
 });
 
+test('host health recovery is bounded and preserves running jobs and unrelated components', async () => {
+  await exec('python3', [fileURLToPath(new URL('./health_recovery.py', import.meta.url))]);
+});
+
 test('update selects running shared services without changing workflow runs', async () => {
   await exec('python3', [fileURLToPath(new URL('./update.py', import.meta.url))]);
 });

@@ -9,6 +9,7 @@ import { once } from 'node:events';
 import { Environments } from '../../asys-runtime/javascript/environments.mjs';
 import { Reader, Writer, directionRoot } from '../../asys-runtime/javascript/channel.mjs';
 import { Store } from '../src/store.mjs';
+import { AsyncStore } from '../src/async-store.mjs';
 import { WorkflowRuntime } from '../src/runtime.mjs';
 import { serveHostChannel } from '../src/host-channel.mjs';
 import { workflow, flow, until } from './helpers.mjs';
@@ -31,10 +32,10 @@ async function fixture(t, workerCommand = command) {
   const f = { root, runtimeRoot, environments, state: join(root, 'workflow'), served: [],
     host: { send: await new Writer(directionRoot(runtimeRoot, 'workflow', 'in')).ready(),
       read: await new Reader(directionRoot(runtimeRoot, 'workflow', 'out')).ready() },
-    serve() {
+    serve({ recover = true } = {}) {
       const controller = new AbortController();
-      const runtime = new WorkflowRuntime({ store: new Store(this.state), environments });
-      const running = runtime.recover().then(() => serveHostChannel(runtime, { root: runtimeRoot, signal: controller.signal }));
+      const runtime = new WorkflowRuntime({ store: new AsyncStore(this.state), environments });
+      const running = (recover ? runtime.recover() : Promise.resolve()).then(() => serveHostChannel(runtime, { root: runtimeRoot, signal: controller.signal }));
       const entry = { runtime, controller, running, async stop() { controller.abort(new Error('test stop')); await running; await runtime.close(); } };
       this.served.push(entry);
       return entry;
@@ -50,6 +51,96 @@ async function fixture(t, workerCommand = command) {
   });
   return f;
 }
+
+test('status distinguishes an active workflow from preserved state in an await-resume component without changing it', async t => {
+  const f = await fixture(t);
+  let engine = f.serve();
+  await f.host.send.send('start', { id: 'waiting', bpmnXml: workflow('<bpmn:receiveTask id="pause"/>'), environment: 'test' });
+  await f.collect(event => event.type === 'activity.wait');
+  let request = await f.host.send.send('status', { id: 'waiting' });
+  let replies = await f.collect(event => event.type === 'accepted' && event.data.request === request.sequence);
+  let reply = replies.find(event => event.type === 'accepted' && event.data.request === request.sequence);
+  assert.equal(reply.data.runId, 'waiting');
+  assert.equal(reply.data.status, 'waiting');
+  assert.equal(reply.data.active, true);
+  await engine.stop();
+  engine = f.serve({ recover: false });
+  const record = engine.runtime.store.run('waiting');
+  const events = engine.runtime.store.events('waiting');
+  request = await f.host.send.send('status', { id: 'waiting' });
+  replies = await f.collect(event => event.type === 'accepted' && event.data.request === request.sequence);
+  reply = replies.find(event => event.type === 'accepted' && event.data.request === request.sequence);
+  assert.equal(reply.data.workflowId, record.workflowId);
+  assert.equal(reply.data.status, 'waiting');
+  assert.equal(reply.data.active, false);
+  assert.deepEqual(engine.runtime.store.run('waiting'), record);
+  assert.deepEqual(engine.runtime.store.events('waiting'), events);
+  await engine.stop();
+});
+
+test('recover reattaches an inactive workflow to its still-running job without cancellation or replacement', async t => {
+  const f = await fixture(t, ['python3', '-c', `import json,os,pathlib,signal,time
+with open('starts', 'a') as log: log.write(os.environ['ASYS_JOB_ID'] + '\\n')
+def cancelled(*args):
+    pathlib.Path('cancelled').write_text('cancelled')
+    raise SystemExit(1)
+signal.signal(signal.SIGTERM, cancelled)
+while not pathlib.Path('release').exists(): time.sleep(0.01)
+json.dump({'answer':42}, open(os.environ['ASYS_RESULT'], 'w'))`]);
+  let engine = f.serve();
+  await f.host.send.send('start', { id: 'running', bpmnXml: workflow(`<bpmn:task id="work">${binding}</bpmn:task>`), environment: 'test' });
+  await f.collect(event => event.type === 'job.created');
+  const job = await until(() => Object.values(engine.runtime.store.run('running')?.jobs ?? {}).find(job => job.status === 'submitted'));
+  const queue = f.environments.queue('test');
+  await until(async () => (await queue.state(job.id)).status === 'running');
+  await until(async () => { try { return await readFile(join(f.root, 'workspace', 'starts'), 'utf8'); } catch { return false; } });
+  await engine.stop();
+  assert.equal((await queue.state(job.id)).status, 'running');
+  engine = f.serve({ recover: false });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const request = await f.host.send.send('recover', { id: 'running' });
+    const replies = await f.collect(event => event.type === 'accepted' && event.data.request === request.sequence);
+    assert.equal(replies.find(event => event.type === 'accepted' && event.data.request === request.sequence).data.active, true);
+  }
+  assert.equal(Object.values(engine.runtime.store.run('running').jobs)[0].id, job.id);
+  assert.equal((await queue.state(job.id)).status, 'running');
+  await writeFile(join(f.root, 'workspace', 'release'), 'go');
+  const events = await f.collect(event => event.type === 'run.result');
+  assert.equal(events.at(-1).data.status, 'completed');
+  assert.equal(events.filter(event => event.type === 'run.recovered').length, 1);
+  assert.equal(events.filter(event => event.type === 'job.created').length, 1);
+  assert.equal(events.filter(event => event.type === 'job.completed').length, 1);
+  assert.equal(await readFile(join(f.root, 'workspace', 'starts'), 'utf8'), `${job.id}\n`);
+  await assert.rejects(readFile(join(f.root, 'workspace', 'cancelled')), { code: 'ENOENT' });
+  await engine.stop();
+});
+
+test('terminal status and recovery include the durable result after the previous result event was pruned', async t => {
+  const f = await fixture(t);
+  const engine = f.serve();
+  await f.host.send.send('start', { id: 'finished', bpmnXml: workflow(`<bpmn:task id="work">${binding}</bpmn:task>`),
+    environment: 'test', variables: { request: 'retained' } });
+  const events = await f.collect(event => event.type === 'run.result');
+  const previous = events.find(event => event.type === 'run.result');
+  const { store: _watermark, ...expected } = previous.data;
+  const barrier = await f.host.send.send('status', { id: 'finished' });
+  const acknowledged = await f.collect(event => event.type === 'accepted' && event.data.request === barrier.sequence);
+  const after = acknowledged.find(event => event.type === 'accepted' && event.data.request === barrier.sequence).sequence;
+  await f.host.read.advance(after);
+  await f.host.read.prune();
+  assert.ok(!(await f.host.read.read(0)).some(event => event.type === 'run.result'));
+  const before = engine.runtime.store.events('finished', 0, 1000);
+  for (const kind of ['status', 'recover']) {
+    const request = await f.host.send.send(kind, { id: 'finished' });
+    const replies = await f.collect(event => event.type === 'accepted' && event.data.request === request.sequence,
+      { after });
+    const reply = replies.find(event => event.type === 'accepted' && event.data.request === request.sequence);
+    assert.equal(reply.data.status, 'completed');
+    assert.deepEqual(reply.data.result, expected);
+  }
+  assert.deepEqual(engine.runtime.store.events('finished', 0, 1000), before);
+  await engine.stop();
+});
 
 test('a run started over the channel reports every event and a result, and a bad request is rejected in place', async t => {
   const f = await fixture(t);

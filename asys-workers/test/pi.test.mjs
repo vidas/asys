@@ -5,10 +5,59 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { runTestAgent as runAgent } from './helpers.mjs';
-import { groupModels, streamProvider } from '../src/provider-adapter.mjs';
+import { groupModels, listProviderModels, streamProvider } from '../src/provider-adapter.mjs';
 import { Code, ConnectError } from '@connectrpc/connect';
 import { createResourceExhaustedError } from '@cyclo/provider/errors';
 import { assistant, model } from './helpers.mjs';
+
+test('catalogue capacity waits reuse capped reset timing and report the operation', async () => {
+  let clock = 1_700_000_000_000, calls = 0;
+  const events = [], delays = [], catalogue = { models: [model] };
+  const provider = { async listModels() {
+    if (++calls === 1) throw createResourceExhaustedError(new Date(clock + 86400000));
+    if (calls === 2) throw new ConnectError('capacity unavailable', Code.ResourceExhausted);
+    return catalogue;
+  } };
+  assert.equal(await listProviderModels(provider, {}, {
+    now: () => clock, random: () => 1,
+    async sleep(ms) { delays.push(ms); clock += ms; },
+    onExhaustion: detail => events.push(['exhausted', detail]),
+    onRetry: detail => events.push(['retrying', detail]),
+  }), catalogue);
+  assert.equal(calls, 3);
+  assert.deepEqual(delays, [600000, 2000]);
+  assert.deepEqual(events.map(([type, detail]) => [type, detail.operation, detail.delayMs]), [
+    ['exhausted', 'list_models', 600000], ['retrying', 'list_models', 0],
+    ['exhausted', 'list_models', 2000], ['retrying', 'list_models', 0],
+  ]);
+});
+
+test('catalogue transport backoff stays capped while native socket failures persist', async () => {
+  let calls = 0;
+  const delays = [];
+  const provider = { async listModels() {
+    if (++calls <= 8) throw new Error('transport failed', { cause: Object.assign(new Error('broken pipe'), { code: 'EPIPE' }) });
+    return { models: [model] };
+  } };
+  await listProviderModels(provider, {}, { random: () => 1, sleep: async ms => delays.push(ms) });
+  assert.equal(calls, 9);
+  assert.deepEqual(delays, [1000, 2000, 4000, 8000, 16000, 30000, 30000, 30000]);
+});
+
+test('catalogue cancellation before lookup and during an RPC never retries', async t => {
+  for (const before of [true, false]) await t.test(before ? 'before lookup' : 'in flight', async () => {
+    const controller = new AbortController(), cancellation = new Error('Catalogue cancelled');
+    let calls = 0;
+    if (before) controller.abort(cancellation);
+    const provider = { async listModels(_request, { signal }) {
+      calls++;
+      controller.abort(cancellation);
+      signal.throwIfAborted();
+    } };
+    await assert.rejects(listProviderModels(provider, { signal: controller.signal }), error => error === cancellation);
+    assert.equal(calls, before ? 0 : 1);
+  });
+});
 
 test('the worker publishes actual text and thinking before the message finishes', { timeout: 10000 }, async t => {
   const workspace = await mkdtemp(join(tmpdir(), 'asys-live-transcript-'));

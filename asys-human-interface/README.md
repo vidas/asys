@@ -12,8 +12,10 @@ asys-run --resume RUN --human
 
 The first command attaches to the shared service. Workflow `--human` creates a
 private service and terminal for that run. Questions can arrive before a terminal
-attaches. A shared service survives handler exit; a private handler removes its
-own service when it exits. Closing a terminal never answers a question.
+attaches. A shared service survives handler exit. A private handler normally
+removes its own service when it exits; workflow health recovery detaches the
+terminal and preserves that service and its pending requests. Closing a terminal
+never answers a question.
 
 `--root` selects the same asys state as the runner. Human records live under
 `ROOT/human`. `--system`, `--dcomp-state-root` and `--runtime-root` select the dcomp
@@ -21,6 +23,13 @@ namespace and storage. `--private --name review-desk` publishes
 `review-desk.human` without changing the global; a runner may select it with
 `-L human=review-desk.human`. `--claimant NAME` chooses the identity used for
 candidate eligibility, not an authentication mechanism.
+
+Reconnect to a private service retained during workflow recovery using
+`asys-human-prompt --private --name COMPONENT` with the original `--system`,
+`--root`, and dcomp settings. The terminal checks the saved session identity and
+acquires its existing handler lock, recovers an abandoned claim, and rediscovers
+pending questions. It retains that service on exit. A matching component that
+has not been explicitly retained is not adopted.
 
 ## Answer a request
 
@@ -129,6 +138,16 @@ Handler state records the selected component, request, unresolved claim and
 answer. `asys update` refreshes owned shared services with current images;
 private services are excluded. Replacement interrupts unanswered RPCs, so finish
 active Human decisions before applying a service update.
+
+The handler's separate `control` channel accepts `detach` with an empty object.
+After successful setup, it publishes `attached` with its `component`, process
+`pid`, and the optional `ASYS_HUMAN_ATTACHMENT` nonce supplied by its host. The
+host waits for that acknowledgement after claim recovery and request discovery.
+On detach, the handler persists service retention before replying `detached` with `request` (the
+request sequence) and `component`, then exits while releasing its active claim.
+Shutdown also checks pending detach requests, so a termination signal following
+a durable detach cannot remove the service. Claim release failures remain in
+the saved session for the next terminal to recover.
 
 ## Development
 

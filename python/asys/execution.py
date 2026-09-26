@@ -8,9 +8,9 @@ import time
 import uuid
 
 from asys_runtime.environment import Environment
-from asys_runtime.files import write_json
+from asys_runtime.files import timestamp, write_json
 from asys_runtime.permissions import mkdir, shared
-from .lifecycle import ComponentHost, LaunchError, CommandTimeout
+from .lifecycle import ComponentHost, LaunchError, CommandTimeout, Interrupted, RecoveryRequired
 from .human_service import ensure_human
 from .config import system_models
 from .options import dcomp_options
@@ -91,6 +91,17 @@ def prepare_run(root, workspace):
 
 
 class EnvironmentHost(ComponentHost):
+    HEALTH_GRACE = 60
+    HEALTH_RESTART_READY = 90
+    HEALTH_RESTART_LIMIT = 1
+
+    def __init__(self, args):
+        super().__init__(args)
+        self.record = {}
+        self._unhealthy_since = {}
+        self._health_restart_deadline = {}
+        self.preserve_components = False
+
     def prepare_environment(self, environment, links, *, configuration_directory=None, human_target=None):
         definition = Environment(environment, external=configuration_directory)
         descriptor, config = definition.descriptor, definition.config
@@ -213,11 +224,115 @@ class EnvironmentHost(ComponentHost):
             if not getattr(self, '_status_delayed', False):
                 self.say(f"Component status temporarily unavailable; execution continues and monitoring will retry: {error}")
             self._status_delayed = True
+            now = time.monotonic()
+            for name, since in self._unhealthy_since.items():
+                deadline = self._health_restart_deadline.get(name, since + self.HEALTH_GRACE)
+                if now >= deadline:
+                    self.require_health_recovery(name, 'Component health could not be observed before its recovery deadline')
             return
+        except (LaunchError, OSError, ValueError) as error:
+            if self._health_restart_deadline:
+                name = next(iter(self._health_restart_deadline))
+                self.require_health_recovery(name, f'Could not monitor the restarted engine: {error}')
+            raise
         if getattr(self, '_status_delayed', False):
             self.say("Component status monitoring recovered")
             self._status_delayed = False
-        self.check_components(components)
+        try:
+            self.check_components(components, allow_unhealthy=True)
+        except LaunchError as error:
+            if self._health_restart_deadline:
+                name = next(iter(self._health_restart_deadline))
+                self.require_health_recovery(name, f'Component unavailable during engine recovery: {error}')
+            raise
+        now = time.monotonic()
+        for name in self.owned:
+            status = components[name]['status']
+            if name in self._unhealthy_since:
+                self.record['component_health'][name]['status'] = dict(status)
+            if status.get('status') == 'running' and status.get('health') == 'unhealthy':
+                if name not in self._unhealthy_since:
+                    self._unhealthy_since[name] = now
+                    self.record.setdefault('component_health', {})[name] = {
+                        'state': 'unhealthy', 'since': timestamp(), 'status': dict(status)}
+                    self._publish_health()
+                    self._health_notice(f"Component {name} is running but unhealthy; execution continues "
+                                        f"during a {self.HEALTH_GRACE}s recovery grace period.")
+                    self._record_component_health(name, status, inspect=True)
+            elif (name in self._unhealthy_since and status.get('status') == 'running'
+                  and status.get('health') in {'healthy', 'none'}):
+                del self._unhealthy_since[name]
+                self._health_restart_deadline.pop(name, None)
+                self.record.get('component_health', {}).pop(name, None)
+                self._publish_health()
+                self._health_notice(f"Component {name} health recovered")
+                self._record_component_health(name, status)
+        # Inspect every component before deciding to restart: workers/worlds
+        # with expired health must never be replayed as a side effect.
+        for name, since in list(self._unhealthy_since.items()):
+            deadline = self._health_restart_deadline.get(name)
+            if deadline is not None:
+                if now >= deadline:
+                    self.require_health_recovery(name, 'Engine health did not recover after its targeted restart')
+            elif now - since >= self.HEALTH_GRACE:
+                self.recover_unhealthy_component(name, components[name]['status'])
+
+    def _publish_health(self):
+        if self.record.get('status') in {'running', 'degraded', 'recovering'}:
+            recovering = any(value.get('state') == 'restarting'
+                             for value in self.record.get('component_health', {}).values())
+            self.record['status'] = 'recovering' if recovering else 'degraded' if self._unhealthy_since else 'running'
+        if hasattr(self, 'snapshot'):
+            try:
+                self.snapshot()
+            except OSError as error:
+                self._health_notice(f'Could not save component health status: {error}')
+                return False
+        return True
+
+    def recover_unhealthy_component(self, name, status):
+        self.require_health_recovery(name, 'Persistent unhealthy component cannot be restarted without interrupting its jobs')
+
+    def require_health_recovery(self, name, reason):
+        self.preserve_components = True
+        detail = self.record.setdefault('component_health', {}).setdefault(name, {})
+        detail.update(state='recovery-required', reason=reason)
+        self.record.update(status='recovery-required', components_removed=False)
+        message = (f'{reason}: {name}. Components, jobs and checkpoints are preserved; '
+                   f'inspect component-health.jsonl in {self.directory} and component logs before recovery.')
+        self.record['error'] = message
+        self._record_component_health(name, detail.get('status', {}), action='recovery-required', reason=reason)
+        self._publish_health()
+        raise RecoveryRequired(message)
+
+    def _health_notice(self, message):
+        # Diagnostic log I/O must not turn a health warning into teardown.
+        try:
+            self.say(message)
+        except OSError:
+            pass
+
+    def _record_component_health(self, name, status, *, inspect=False, **details):
+        record = {'time': timestamp(), 'component': name, 'status': status}
+        record.update(details)
+        if inspect:
+            try:
+                container = status.get('container_id')
+                if not container:
+                    raise ValueError('No container ID in component status')
+                # Preserve the healthcheck ring before Docker overwrites it.
+                # State excludes environment variables and container config.
+                record['docker_state'] = json.loads(self.command(
+                    ['docker', 'container', 'inspect', '--format', '{{json .State}}', container], timeout=5))
+            except Interrupted:
+                raise
+            except Exception as error:
+                record['diagnostic_error'] = str(error)
+        try:
+            with (self.directory / 'component-health.jsonl').open('a', encoding='utf-8') as output:
+                output.write(json.dumps(record) + '\n')
+        except OSError as error:
+            self._health_notice(f"Could not save component health diagnostics for {name}: {error}")
 
     def wait_ready(self):
         deadline = time.monotonic() + 90

@@ -27,6 +27,25 @@ const NETWORK_ERRORS = new Set([
 
 export const DEFAULT_INFERENCE_IDLE_TIMEOUT_MS = 600_000;
 
+// Catalogue lookup precedes the first inference and needs the same transport
+// recovery as inference. Each RPC retains its existing ten-second deadline.
+export async function listProviderModels(client, { signal } = {}, {
+  now = Date.now, sleep = abortableSleep, random = Math.random,
+  onExhaustion = () => {}, onRetry = () => {},
+} = {}) {
+  for (let retry = 0; ; retry++) {
+    signal?.throwIfAborted();
+    try {
+      const catalogue = await client.listModels({}, { signal, timeoutMs: 10000 });
+      signal?.throwIfAborted();
+      return catalogue;
+    } catch (error) {
+      await waitForProviderRetry(error, retry, { signal, now, sleep, random, onExhaustion, onRetry },
+        { operation: "list_models" });
+    }
+  }
+}
+
 export function groupModels(models, { onInvalid = console.warn } = {}) {
   if (!Array.isArray(models)) throw new TypeError("Provider catalogue has no model list");
   if (typeof onInvalid !== "function") throw new TypeError("onInvalid must be a function");
@@ -125,22 +144,10 @@ async function pump(output, client, publicId, model, context, options, { now, sl
         }
         throw new ConnectError("Provider stream ended without a terminal Pi event", Code.Unavailable);
       } catch (error) {
-        options.signal?.throwIfAborted();
-        const retryAt = resourceExhaustedRetryAt(error);
-        const exhausted = error instanceof ConnectError && error.code === Code.ResourceExhausted;
-        if (!exhausted && !retryableTransportError(error)) throw error;
-        const delayMs = retryAt === undefined
-          ? Math.round(Math.min(30_000, 1000 * 2 ** Math.min(retry, 5)) * (0.5 + random() * 0.5))
-          : Math.min(MAX_EXHAUSTION_RETRY_DELAY_MS,
-            Math.max(MIN_EXHAUSTION_RETRY_DELAY_MS, retryAt.getTime() - now()));
-        const detail = { attempt: retry + 1, delayMs, errorMessage: providerErrorMessage(error),
-          outputStarted: emitted, idleTimeoutMs, retryAt: new Date(now() + delayMs) };
-        if (exhausted) onExhaustion(detail);
-        else onRetry(detail);
         // End the failed RPC before waiting; capacity waits have no idle timer.
-        await sleep(delayMs, options.signal);
-        options.signal?.throwIfAborted();
-        if (exhausted) onRetry({ ...detail, delayMs: 0 });
+        await waitForProviderRetry(error, retry,
+          { signal: options.signal, now, sleep, random, onExhaustion, onRetry },
+          { outputStarted: emitted, idleTimeoutMs });
       }
     }
   } catch (error) {
@@ -202,6 +209,26 @@ function retryableTransportError(error) {
     if (NETWORK_ERRORS.has(error.code)) return true;
   }
   return false;
+}
+
+async function waitForProviderRetry(error, retry, { signal, now, sleep, random, onExhaustion, onRetry }, extra) {
+  signal?.throwIfAborted();
+  const retryAt = resourceExhaustedRetryAt(error);
+  const exhausted = error instanceof ConnectError && error.code === Code.ResourceExhausted;
+  if (!exhausted && !retryableTransportError(error)) throw error;
+  const delayMs = retryAt === undefined
+    ? Math.round(Math.min(30_000, 1000 * 2 ** Math.min(retry, 5)) * (0.5 + random() * 0.5))
+    : Math.min(MAX_EXHAUSTION_RETRY_DELAY_MS,
+      Math.max(MIN_EXHAUSTION_RETRY_DELAY_MS, retryAt.getTime() - now()));
+  const detail = { attempt: retry + 1, delayMs, errorMessage: providerErrorMessage(error),
+    ...extra, retryAt: new Date(now() + delayMs) };
+  if (exhausted) onExhaustion(detail);
+  else onRetry(detail);
+  signal?.throwIfAborted();
+  try { await sleep(delayMs, signal); }
+  catch (error) { signal?.throwIfAborted(); throw error; }
+  signal?.throwIfAborted();
+  if (exhausted) onRetry({ ...detail, delayMs: 0 });
 }
 
 // Pi compares assistant identities with the selected public route when deciding

@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "python"), str(ROOT / "asys-runtime")]
-from asys.lifecycle import ComponentHost, Interrupted, LaunchError
+from asys.lifecycle import ComponentHost, CommandTimeout, Interrupted, LaunchError
 from asys.execution import EnvironmentHost
 
 
@@ -62,6 +62,8 @@ class LifecycleTest(unittest.TestCase):
 
     def test_cleanup_removes_only_owned_components_in_reverse_order(self):
         self.host.owned = ["workers", "workflow", "never-started"]
+        evidence = self.host.directory / 'component-health.jsonl'
+        evidence.write_text('{"component":"workers","health":"unhealthy"}\n')
         document = {"components": [{"name": name} for name in ["unrelated", "workers", "workflow"]]}
         commands = []
         def command(args, **options):
@@ -75,6 +77,7 @@ class LifecycleTest(unittest.TestCase):
                                     self.host.dcomp + ["rm-component", "test", "workers"]])
         self.assertEqual(self.host.owned, [])
         self.assertEqual((self.host.directory / "components.log").read_text(), "saved logs\n")
+        self.assertEqual(evidence.read_text(), '{"component":"workers","health":"unhealthy"}\n')
 
     def test_failed_cleanup_keeps_remaining_ownership(self):
         self.host.owned = ["workers", "workflow"]
@@ -101,6 +104,95 @@ class LifecycleTest(unittest.TestCase):
             with self.subTest(status=status), self.assertRaises(LaunchError):
                 self.host.check_components({"workers": {"status": status}})
         self.host.check_components({"workers": {"status": {"status": "running", "health": "healthy"}}})
+
+    def test_runtime_health_policy_only_tolerates_running_unhealthy_components(self):
+        self.host.owned = ['worker']
+        self.host.check_components({'worker': {'status': {'status': 'running', 'health': 'unhealthy'}}},
+                                   allow_unhealthy=True)
+        for status in [{}, {'health': 'unhealthy'}, {'status': 'exited', 'health': 'unhealthy'},
+                       {'status': 'dead'}, {'status': 'missing'},
+                       {'status': 'restarting', 'health': 'unhealthy'},
+                       {'status': 'running', 'health': 'unhealthy', 'problem': 'lost network'}]:
+            with self.subTest(status=status), self.assertRaises(LaunchError):
+                self.host.check_components({'worker': {'status': status}}, allow_unhealthy=True)
+
+    def test_unhealthy_runtime_preserves_execution_and_health_evidence_until_recovery(self):
+        host = EnvironmentHost(SimpleNamespace(system='test'))
+        host.directory = self.host.directory
+        host.owned = ['worker']
+        messages = []
+        host.say = messages.append
+        status = {'status': 'running', 'health': 'unhealthy', 'container_id': 'actual-container'}
+        components = {'worker': {'status': status}, 'unrelated': {'status': {'status': 'dead'}}}
+        docker_state = {'Running': True, 'Health': {'Status': 'unhealthy', 'FailingStreak': 3,
+                                                  'Log': [{'ExitCode': 1, 'Output': 'heartbeat stale'}]}}
+        with patch.object(host, 'observe', return_value=({}, components)), \
+                patch.object(host, 'command', return_value=json.dumps(docker_state)) as command, \
+                patch.object(host, 'cleanup_components') as cleanup:
+            for _ in range(4):
+                host.monitor_components()
+            self.assertEqual(len(messages), 1)
+            self.assertIn('execution continues', messages[0])
+            command.assert_called_once_with(['docker', 'container', 'inspect', '--format', '{{json .State}}',
+                                             'actual-container'], timeout=5)
+            self.assertEqual(host.owned, ['worker'])
+            cleanup.assert_not_called()
+            status['health'] = 'starting'
+            host.monitor_components()
+            self.assertEqual(len(messages), 1, 'starting is not proof of health recovery')
+            status['health'] = 'healthy'
+            host.monitor_components()
+            host.monitor_components()
+            self.assertEqual(len(messages), 2)
+            self.assertIn('recovered', messages[-1])
+            status.update(status='exited', health='unhealthy')
+            with self.assertRaisesRegex(LaunchError, 'unavailable'):
+                host.monitor_components()
+            cleanup.assert_not_called()
+        evidence = [json.loads(line) for line in (host.directory / 'component-health.jsonl').read_text().splitlines()]
+        self.assertEqual([item['status']['health'] for item in evidence], ['unhealthy', 'healthy'])
+        self.assertEqual(evidence[0]['docker_state'], docker_state)
+        self.assertTrue(all(item['time'] and item['component'] == 'worker' for item in evidence))
+
+    def test_unhealthy_startup_still_requires_readiness(self):
+        host = EnvironmentHost(SimpleNamespace(system='test'))
+        host.directory = self.host.directory
+        host.owned = ['worker']
+        host.say = lambda message: None
+        with patch.object(host, 'observe', return_value=({}, {
+                'worker': {'status': {'status': 'running', 'health': 'unhealthy'}}})), \
+                patch.object(host, 'command') as command:
+            with self.assertRaisesRegex(LaunchError, 'unavailable'):
+                host.wait_ready()
+            command.assert_not_called()
+
+    def test_health_diagnostic_failures_do_not_fail_execution(self):
+        for error in [CommandTimeout('diagnostic timed out'), OSError('Docker unavailable'),
+                      ValueError('invalid diagnostic JSON')]:
+            with self.subTest(error=error):
+                host = EnvironmentHost(SimpleNamespace(system='test'))
+                host.directory = self.host.directory
+                host.owned = ['worker']
+                host.say = lambda message: None
+                with patch.object(host, 'observe', return_value=({}, {'worker': {'status': {
+                        'status': 'running', 'health': 'unhealthy', 'container_id': 'actual-container'}}})), \
+                        patch.object(host, 'command', side_effect=error) as command, \
+                        patch.object(host, 'cleanup_components') as cleanup:
+                    host.monitor_components()
+                    host.monitor_components()
+                    command.assert_called_once()
+                    cleanup.assert_not_called()
+                evidence = json.loads((host.directory / 'component-health.jsonl').read_text().splitlines()[-1])
+                self.assertIn(str(error), evidence['diagnostic_error'])
+        host = EnvironmentHost(SimpleNamespace(system='test'))
+        host.directory = self.host.directory / 'unavailable-directory'
+        host.owned = ['worker']
+        host.say = lambda message: None
+        with patch.object(host, 'observe', return_value=({}, {'worker': {'status': {
+                'status': 'running', 'health': 'unhealthy', 'container_id': 'actual-container'}}})), \
+                patch.object(host, 'command', return_value='{}'), patch.object(host, 'cleanup_components') as cleanup:
+            host.monitor_components()
+            cleanup.assert_not_called()
 
     def test_busy_system_status_does_not_fail_or_clean_up_an_active_run(self):
         host = EnvironmentHost(SimpleNamespace(system="test"))

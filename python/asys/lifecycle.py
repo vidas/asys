@@ -17,6 +17,10 @@ class CommandTimeout(LaunchError):
     pass
 
 
+class RecoveryRequired(LaunchError):
+    """Automatic recovery stopped; retain components and durable work."""
+
+
 class Interrupted(Exception):
     pass
 
@@ -95,11 +99,12 @@ class ComponentHost:
             raise LaunchError("asys requires dcomp 0.3 (Machine API 2)")
         return value
 
-    def check_components(self, components, names=None):
+    def check_components(self, components, names=None, *, allow_unhealthy=False):
         for name in self.owned if names is None else names:
             status = (components.get(name) or {}).get("status", {})
             if (not status or status.get("problem") or status.get("status") in {"exited", "dead", "missing"}
-                    or status.get("health") == "unhealthy"):
+                    or (status.get("health") == "unhealthy"
+                        and not (allow_unhealthy and status.get("status") == "running"))):
                 raise LaunchError(f"Component {name} is unavailable: {status}")
 
     def cleanup_components(self, log_name="components.log"):

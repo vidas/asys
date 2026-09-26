@@ -25,6 +25,7 @@ export class WorkflowRuntime {
     this.definitions = new Map();
     this.active = new Map();
     this.resuming = new Map();
+    this.operations = new Map();
     this.closing = false;
   }
   async prepare(artifact) {
@@ -37,11 +38,19 @@ export class WorkflowRuntime {
       await this.continueRun(record);
     }
   }
+  recoverRun({ id }) {
+    return this.withRun(id, async () => {
+      this.ready();
+      const record = this.record(id);
+      if (!TERMINAL.has(record.status) && !this.active.has(id)) await this.continueRun(record);
+      return this.getRun({ id });
+    });
+  }
   async continueRun(record) {
     if (record.engine !== ENGINE) throw new Error(`Run ${record.id} requires workflow engine ${record.engine}`);
     await this.prepare(this.store.workflow(record.workflowId));
     record.status = 'running';
-    this.store.save(record);
+    await this.store.save(record);
     const run = this.attach(record);
     run.event('run.recovered');
     if (record.definition) run.definition.recover(record.definition).resume();
@@ -52,7 +61,7 @@ export class WorkflowRuntime {
   resumeRun({ id }) {
     this.ready();
     if (!this.resuming.has(id)) {
-      const pending = this.resumeFailedRun(id).finally(() => this.resuming.delete(id));
+      const pending = this.withRun(id, () => this.resumeFailedRun(id)).finally(() => this.resuming.delete(id));
       this.resuming.set(id, pending);
     }
     return this.resuming.get(id);
@@ -103,17 +112,30 @@ export class WorkflowRuntime {
     }
     // Record the new job IDs before dispatch. Recovery reuses these IDs, so a
     // launcher or engine restart cannot accidentally execute a job twice.
-    this.store.save(point, events);
+    await this.store.save(point, events);
     await this.continueRun(point);
     return this.getRun({ id });
   }
-  ready() { if (this.closing) fail('Workflow runtime is stopping', Code.Unavailable); }
+  ready() {
+    if (this.store.failure) throw this.store.failure;
+    if (this.closing) fail('Workflow runtime is stopping', Code.Unavailable);
+  }
+  withRun(id, action) {
+    // Async persistence leaves a window in which the live record is newer than
+    // disk. Serialize requests for a run so an idempotent duplicate cannot
+    // acknowledge that record before its first request has durably saved it.
+    const pending = (this.operations.get(id) ?? Promise.resolve()).catch(() => {}).then(action);
+    this.operations.set(id, pending);
+    const cleanup = () => { if (this.operations.get(id) === pending) this.operations.delete(id); };
+    pending.then(cleanup, cleanup);
+    return pending;
+  }
   async loadWorkflow({ bpmnXml }) {
     this.ready();
     let artifact;
     try { artifact = await this.prepare(await parseWorkflow(bpmnXml)); }
     catch (error) { fail(error.message); }
-    return { workflowId: this.store.loadWorkflow(artifact) };
+    return { workflowId: await this.store.loadWorkflow(artifact) };
   }
   listWorkflows() { return { workflows: this.store.workflows().map(info) }; }
   describe({ workflowId }) {
@@ -133,7 +155,8 @@ export class WorkflowRuntime {
     const missingTypes = requiredTypes.filter(type => !descriptor.types.includes(type));
     return { compatible: !missingTypes.length, requiredTypes, missingTypes };
   }
-  async startRun({ id, workflowId, processId = '', variablesJson = '{}', environment }) {
+  startRun(request) { return this.withRun(request.id, () => this.start(request)); }
+  async start({ id, workflowId, processId = '', variablesJson = '{}', environment }) {
     this.ready(); identifier(id, 'Run ID');
     try { environmentName(environment); } catch (error) { fail(error.message); }
     const artifact = this.store.workflow(workflowId);
@@ -160,11 +183,11 @@ export class WorkflowRuntime {
     }
     const record = { id, workflowId, processId, environment, workspace: this.workspace, inputHash, variables: input, engine: ENGINE, status: 'running',
       createdAt: now(), updatedAt: now(), jobs: {}, messages: {}, output: {}, definition: null };
-    this.store.save(record, [{ type: 'run.created' }]);
+    await this.store.save(record, [{ type: 'run.created' }]);
     const run = this.attach(record);
     run.definition.run({ processId });
     await run.flush();
-    return { run: runInfo(run.record) };
+    return this.getRun({ id });
   }
   attach(record) {
     const run = new Execution(this, record, this.store.workflow(record.workflowId));
@@ -176,7 +199,13 @@ export class WorkflowRuntime {
     if (!record) fail('Run not found', Code.NotFound);
     return record;
   }
-  getRun({ id }) { return { run: runInfo(this.record(id)) }; }
+  getRun({ id }) {
+    // A terminal status can cause the host to tear down the component. Expose
+    // only committed state, even while an execution has advanced in memory.
+    const record = this.store.run(id);
+    if (!record) fail('Run not found', Code.NotFound);
+    return { run: runInfo(record) };
+  }
   listRuns({ limit = 50, before = '' } = {}) {
     limit = Math.max(1, Math.min(limit || 50, 200));
     const all = this.store.runs();
@@ -185,20 +214,25 @@ export class WorkflowRuntime {
     const page = all.slice(start, start + limit);
     return { runs: page.map(runInfo), nextBefore: start + limit < all.length ? page.at(-1).id : '' };
   }
-  async cancelRun({ id }) {
+  cancelRun(request) { return this.withRun(request.id, () => this.cancel(request)); }
+  async cancel({ id }) {
     this.ready();
     const record = this.record(id);
-    if (TERMINAL.has(record.status)) return { run: runInfo(record) };
     const run = this.active.get(id);
+    if (TERMINAL.has(record.status)) {
+      await run?.flush();
+      return this.getRun({ id });
+    }
     record.status = 'cancelled';
     run.abort.abort(new Error('Run cancelled'));
     run.definition.stop();
     run.event('run.cancelled');
     await run.cancelJobs();
     await run.flush();
-    return { run: runInfo(record) };
+    return this.getRun({ id });
   }
-  async sendMessage({ runId, target, payloadJson = '{}', id }) {
+  sendMessage(request) { return this.withRun(request.runId, () => this.message(request)); }
+  async message({ runId, target, payloadJson = '{}', id }) {
     this.ready(); identifier(id, 'Message ID'); requiredString(target, 'Message target');
     const record = this.record(runId);
     let payload;
@@ -207,7 +241,7 @@ export class WorkflowRuntime {
     const hash = digest({ target, payload });
     if (Object.hasOwn(record.messages, id)) {
       if (record.messages[id].hash !== hash) fail('Message ID was already used with different input', Code.AlreadyExists);
-      return { run: runInfo(record) };
+      return this.getRun({ id: runId });
     }
     if (TERMINAL.has(record.status)) fail('Run has finished', Code.FailedPrecondition);
     const run = this.active.get(runId);
@@ -216,10 +250,10 @@ export class WorkflowRuntime {
     if (waiting?.activity.type !== 'bpmn:ReceiveTask' && !known) fail('Message target must be a BPMN message, signal, or waiting receive execution');
     record.messages = { ...record.messages, [id]: { hash, target, payload, applied: false } };
     run.event('message.received', '', { id, target });
-    run.checkpoint();
+    await run.checkpoint();
     run.deliver(id);
     await run.flush();
-    return { run: runInfo(record) };
+    return this.getRun({ id: runId });
   }
   getEvents({ runId, after = 0n, limit = 100 }) {
     this.record(runId);
@@ -227,15 +261,21 @@ export class WorkflowRuntime {
       sequence: BigInt(e.sequence), runId: e.run_id, type: e.type, activityId: e.activity_id, time: e.time, dataJson: e.data,
     })) };
   }
-  async close() {
+  close() { return this.closed ??= this.stop(); }
+  async stop() {
     this.closing = true;
-    for (const run of this.active.values()) {
-      run.abort.abort(new Error('Workflow runtime stopping'));
-      if (!TERMINAL.has(run.record.status)) run.definition.stop();
+    try {
+      // Finish requests already admitted before closing their executions/store.
+      await Promise.allSettled([...this.operations.values()]);
+      for (const run of this.active.values()) {
+        run.abort.abort(new Error('Workflow runtime stopping'));
+        if (!TERMINAL.has(run.record.status)) run.definition.stop();
+      }
+      await Promise.allSettled([...this.active.values()].flatMap(run => [...run.pending]));
+      if (!this.store.failure) for (const run of this.active.values()) await run.flush();
+    } finally {
+      await this.store.close();
     }
-    await Promise.allSettled([...this.active.values()].flatMap(run => [...run.pending]));
-    for (const run of this.active.values()) await run.flush();
-    this.store.close();
   }
 }
 
@@ -246,7 +286,7 @@ class Execution {
     this.index = indexElements(artifact.document);
     this.events = []; this.pending = new Set(); this.waiters = new Map();
     this.controllers = new Map(); this.enabled = new Map();
-    this.abort = new AbortController(); this.scheduled = null;
+    this.abort = new AbortController(); this.scheduled = null; this.saving = 0;
     const execution = this;
     function service(coordinator, activity) {
       let controller, executionId;
@@ -296,7 +336,8 @@ class Execution {
   track(promise) {
     this.pending.add(promise);
     promise.then(() => { this.pending.delete(promise); this.schedule(); }, error => {
-      this.pending.delete(promise); this.fatal(error); this.schedule();
+      this.pending.delete(promise);
+      if (!this.runtime.store.failure) { this.fatal(error); this.schedule(); }
     });
     return promise;
   }
@@ -350,11 +391,13 @@ class Execution {
             execution_id: executionId, bpmn: this.index.get(bindingId), ...metadata },
         };
         this.event('job.created', activity.id, { jobId: job.id, type: job.type, executionId, workspace: this.record.workspace });
-        this.checkpoint();
+        await this.checkpoint();
       }
+      if (signal.aborted) return;
       if (job.status === 'completed') { callback(null, clone(job.result)); return; }
       if (job.status === 'failed') throw Object.assign(new Error(job.error.message), { code: job.error.code });
       const descriptor = await this.runtime.environments.get(this.record.environment);
+      if (signal.aborted) return;
       if (!descriptor.types.includes(job.type)) throw new Error(`Environment ${this.record.environment} no longer defines job type ${job.type}`);
       const directory = join(this.runtime.jobRoot, job.id), workspace = this.record.workspace;
       makeDirectory(directory, { recursive: true, mode: 0o700 });
@@ -362,18 +405,21 @@ class Execution {
       job.status = 'submitted';
       if (job.cancelRequested || (signal.aborted && TERMINAL.has(this.record.status))) await this.queue.cancel(job.id);
       if (signal.aborted) return;
-      this.checkpoint();
+      await this.checkpoint();
       const outcome = await this.queue.wait(job.id, { signal });
       if (signal.aborted) return;
       job.result = outcome.result ?? null;
       if (outcome.status !== 'done') throw Object.assign(new Error(outcome.error ?? `Job ${job.id} ${outcome.status}`), { code: String(outcome.exit_code ?? outcome.status) });
       job.status = 'completed'; job.result = outcome.result;
       this.event('job.completed', activity.id, { jobId: job.id, executionId });
-      this.checkpoint();
+      await this.checkpoint();
+      if (signal.aborted) return;
       callback(null, clone(job.result ?? null));
     } catch (error) {
+      if (this.runtime.store.failure) throw error;
       if (signal.aborted) return;
-      this.checkpoint();
+      await this.checkpoint();
+      if (signal.aborted) return;
       const { recovery: _previous, ...point } = this.record;
       const recovery = clone(point);
       const result = { ...(object(job?.result) ? clone(job.result) : {}), exception: error.message };
@@ -384,7 +430,8 @@ class Execution {
         activity.environment.output[binding.result] = clone(result);
       }
       this.event('job.failed', activity.id, { jobId: job?.id, executionId, ...errorRecord(error) });
-      this.checkpoint();
+      await this.checkpoint();
+      if (signal.aborted) return;
       this.failureRecovery = recovery;
       try { callback(error); }
       finally { this.failureRecovery = undefined; }
@@ -406,7 +453,7 @@ class Execution {
     const job = this.record.jobs[executionId];
     if (!job || ['completed', 'failed'].includes(job.status)) return;
     job.cancelRequested = true;
-    this.checkpoint();
+    await this.checkpoint();
     if (job.status === 'submitted') await this.queue.cancel(job.id);
   }
   cancelJobs() { return Promise.all(Object.keys(this.record.jobs).map(id => this.cancelJob(id))); }
@@ -450,19 +497,23 @@ class Execution {
     this.events.push({ type, activityId, data, time: now() });
   }
   schedule() {
-    this.scheduled ??= Promise.resolve().then(() => { this.scheduled = null; this.checkpoint(); });
-    this.scheduled.catch(error => this.fatal(error));
+    if (this.runtime.store.failure) return;
+    this.scheduled ??= Promise.resolve().then(() => { this.scheduled = null; return this.checkpoint(); });
+    this.scheduled.catch(error => { if (!this.runtime.store.failure) this.fatal(error); });
   }
-  async flush() { await this.scheduled; this.checkpoint(); }
-  checkpoint() {
+  async flush() { await this.scheduled; await this.checkpoint(); }
+  async checkpoint() {
     this.record.definition = this.definition.getState();
     const process = this.definition.getProcessById(this.record.processId);
     if (process) { this.record.variables = clone(publicVariables(process.environment)); this.record.output = clone(process.environment.output); }
     if (!TERMINAL.has(this.record.status)) this.record.status = this.definition.activityStatus === 'executing' ? 'running' : 'waiting';
     this.record.updatedAt = now();
-    this.runtime.store.save(this.record, this.events);
+    const events = this.events;
     this.events = [];
-    if (TERMINAL.has(this.record.status) && !this.runtime.closing && !this.pending.size && !this.scheduled) this.runtime.active.delete(this.record.id);
+    this.saving++;
+    try { await this.runtime.store.save(this.record, events); }
+    finally { this.saving--; }
+    if (TERMINAL.has(this.record.status) && !this.runtime.closing && !this.pending.size && !this.scheduled && !this.saving) this.runtime.active.delete(this.record.id);
   }
   fatal(error) {
     if (TERMINAL.has(this.record.status)) return;

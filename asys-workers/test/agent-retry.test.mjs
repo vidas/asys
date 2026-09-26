@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { appendFile, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Code, ConnectError } from '@connectrpc/connect';
 import { runTestAgent as runAgent } from './helpers.mjs';
 import { assistant, model } from './helpers.mjs';
 
@@ -17,6 +18,7 @@ async function fixture(t) {
     async listModels() { return { models: [model] }; },
     async *infer(request) { yield* f.infer(JSON.parse(request.payload), ++f.calls); },
   };
+  f.provider = provider;
   f.run = ({ maxSteps = 8 } = {}) => runAgent({
     config: { model: 'fixture/model', prompt: 'Integrate the circuit.', maxSteps, options: {} },
     job: f.job, workspace, signal: f.controller.signal,
@@ -32,6 +34,55 @@ async function fixture(t) {
   });
   return f;
 }
+
+test('catalogue socket reset at agent startup recovers before the first inference', async t => {
+  const f = await fixture(t);
+  let calls = 0;
+  f.provider.listModels = async (_request, { signal, timeoutMs }) => {
+    assert.equal(signal, f.controller.signal);
+    assert.equal(timeoutMs, 10000);
+    if (++calls === 1) throw new ConnectError('socket hang up', Code.Aborted);
+    return { models: [model] };
+  };
+  f.infer = async function* () {
+    yield response({ type: 'done', reason: 'stop', message: assistant([
+      { type: 'text', text: JSON.stringify({ final: 'Catalogue recovered.', exception: null }) },
+    ]) });
+  };
+  assert.equal((await f.run({ maxSteps: 1 })).final, 'Catalogue recovered.');
+  assert.equal(calls, 2);
+  assert.equal(f.calls, 1);
+  const retry = f.events.find(event => event.type === 'agent.provider_retrying');
+  assert.equal(retry.operation, 'list_models');
+  assert.equal(retry.attempt, 1);
+  assert.match(retry.errorMessage, /socket hang up/);
+  assert.ok(Number.isFinite(Date.parse(retry.retryAt)));
+});
+
+test('permanent catalogue failure never starts inference', async t => {
+  const f = await fixture(t);
+  const failure = new ConnectError('catalogue access denied', Code.PermissionDenied);
+  let calls = 0;
+  f.provider.listModels = async () => { calls++; throw failure; };
+  await assert.rejects(f.run(), error => error === failure);
+  assert.equal(calls, 1);
+  assert.equal(f.calls, 0);
+  assert.ok(!f.events.some(event => event.type === 'agent.provider_retrying'));
+});
+
+test('cancellation during catalogue retry backoff prevents another RPC or inference', async t => {
+  const f = await fixture(t);
+  let calls = 0;
+  f.provider.listModels = async () => { calls++; throw new ConnectError('socket hang up', Code.Aborted); };
+  f.onEvent = (type, data) => {
+    if (type === 'agent.provider_retrying' && data.operation === 'list_models') {
+      queueMicrotask(() => f.controller.abort(new Error('Cancelled during catalogue retry')));
+    }
+  };
+  await assert.rejects(f.run(), /Cancelled during catalogue retry/);
+  assert.equal(calls, 1);
+  assert.equal(f.calls, 0);
+});
 
 test('the inference client retries a terminated response after partial output without repeating completed tools', async t => {
   const f = await fixture(t);

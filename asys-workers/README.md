@@ -73,6 +73,11 @@ it is not a total job deadline. Transient retry backoff is capped at 30 seconds.
 Capacity waits follow the provider's retry time but are capped at ten minutes,
 so recovered capacity is rechecked even when a later reset was reported.
 Cancellation interrupts calls and waits.
+Startup model-catalogue requests use the same transport retry policy, with a
+ten-second deadline per RPC. Their retry events include `operation: list_models`.
+Permanent catalogue errors fail before inference. Swarm catalogue retries stay
+within the decision deadline; capacity exhaustion returns to its controller,
+matching the swarm inference policy.
 Pi's separate transport retry loop is disabled. `maxSteps` counts logical
 inference calls, including compaction, rather than transport retries.
 

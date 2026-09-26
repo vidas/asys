@@ -48,6 +48,15 @@ completed results and execution evidence. Do not supply a new workflow,
 environment, workspace or model during resume. Checkpoint engine compatibility
 is checked before recovery. Resume is not a general migration between versions.
 
+Workflow checkpoints and their events commit together in SQLite WAL mode with
+`synchronous=FULL`. A dedicated writer thread keeps durable disk writes off the
+workflow event loop. Job identities commit before dispatch, and outcomes commit
+before the engine advances or publishes action results. Requests for the same
+run are serialized so duplicate requests cannot acknowledge uncommitted state.
+A persistence error stops the component; a write pending for 60 seconds stops
+its readiness heartbeat. Recovery uses the last committed checkpoint and its
+existing job identities.
+
 The root contains `run.json`, `run.log`, the saved workflow, runtime records and
 job evidence. `asys logs` reads process output; `asys top` and the dashboard read agent
 sessions. The dashboard computes layout from actual saved edges and exposes
@@ -60,7 +69,11 @@ The component exports `asys.workflow.v1.Workflow`. The
 checking, execution, status, cancellation, messages, events and recovery.
 The [engine contract](ENGINE.md) documents adapter compatibility.
 The filesystem host channel uses the runtime's atomic Reader/Writer transport.
-Its start/resume/cancel/message requests belong to an embedding API; there is no
+Its start/resume/cancel/message requests belong to an embedding API. `status`
+reports committed run state and whether an execution is attached; `recover`
+reattaches an inactive, unfinished run using its existing job identities.
+Recovery is idempotent and does not retry failed jobs; `resume` performs that
+explicit retry. There is no
 separate public workflow host executable.
 
 ## Development

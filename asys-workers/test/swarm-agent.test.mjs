@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import Ajv from 'ajv';
+import { Code, ConnectError } from '@connectrpc/connect';
 import { connectNodeAdapter } from '@connectrpc/connect-node';
 import { Provider } from '@cyclo/provider/contract';
 import { createResourceExhaustedError } from '@cyclo/provider/errors';
@@ -51,6 +52,65 @@ async function fixture(t, { input = {}, response = toolResponse(plan), models = 
     run: overrides => swarmAgent({ ...args, ...overrides }, { provider, event: (type, data) => events.push({ type, ...data }) }),
     saved: async () => JSON.parse(await readFile(join(directory, 'agent.json'), 'utf8')) };
 }
+
+test('catalogue socket reset at swarm startup recovers before its bounded inference', async t => {
+  const f = await fixture(t);
+  let calls = 0;
+  f.provider.listModels = async () => {
+    if (++calls === 1) throw new ConnectError('socket hang up', Code.Aborted);
+    return { models: [model] };
+  };
+  assert.deepEqual((await f.run()).actions, plan.actions);
+  assert.equal(calls, 2);
+  assert.equal(f.requests.length, 1);
+  assert.ok(f.events.some(event => event.type === 'agent.provider_retrying' && event.operation === 'list_models'));
+});
+
+test('permanent swarm catalogue failure never starts inference', async t => {
+  const f = await fixture(t);
+  const failure = new ConnectError('catalogue access denied', Code.PermissionDenied);
+  let calls = 0;
+  f.provider.listModels = async () => { calls++; throw failure; };
+  await assert.rejects(f.run(), error => error === failure);
+  assert.equal(calls, 1);
+  assert.equal(f.requests.length, 0);
+});
+
+test('swarm cancellation during catalogue backoff prevents another RPC or inference', async t => {
+  const f = await fixture(t);
+  let calls = 0;
+  f.provider.listModels = async () => { calls++; throw new ConnectError('socket hang up', Code.Aborted); };
+  await assert.rejects(swarmAgent(f.args, { provider: f.provider, event(type, data) {
+    if (type === 'agent.provider_retrying' && data.operation === 'list_models') {
+      queueMicrotask(() => f.controller.abort(new Error('Cancelled during catalogue retry')));
+    }
+  } }), /Cancelled during catalogue retry/);
+  assert.equal(calls, 1);
+  assert.equal(f.requests.length, 0);
+  assert.equal((await f.saved()).agent.status, 'cancelled');
+});
+
+test('swarm catalogue retry stays inside the decision deadline', async t => {
+  const f = await fixture(t, { input: { timeoutSeconds: 0.1 } });
+  let calls = 0;
+  f.provider.listModels = async () => { calls++; throw new ConnectError('socket hang up', Code.Aborted); };
+  await assert.rejects(f.run(), { name: 'TimeoutError' });
+  assert.equal(calls, 1);
+  assert.equal(f.requests.length, 0);
+  assert.equal((await f.saved()).agent.status, 'failed');
+});
+
+test('swarm catalogue exhaustion returns to its controller without inference or retry', async t => {
+  const f = await fixture(t);
+  let calls = 0;
+  f.provider.listModels = async () => {
+    calls++;
+    throw createResourceExhaustedError(new Date(Date.now() + 86400000));
+  };
+  await assert.rejects(f.run(), /Provider exhausted; swarm decision was not retried/);
+  assert.equal(calls, 1);
+  assert.equal(f.requests.length, 0);
+});
 
 test('a swarm decision uses only submit_plan, selected prompt, actual usage and an observer transcript', async t => {
   const f = await fixture(t, { input: { objective: { gardens: 6, survivingTurns: 12 },

@@ -10,7 +10,7 @@ import { createServer } from 'node:http';
 import { connectNodeAdapter } from '@connectrpc/connect-node';
 import { Provider } from '../../asys-inference/components/protocol/provider/gen/cyclo/provider/v1/provider_pb.js';
 import { Environments } from '../../asys-runtime/javascript/environments.mjs';
-import { Store } from '../src/store.mjs';
+import { AsyncStore as Store } from '../src/async-store.mjs';
 import { WorkflowRuntime } from '../src/runtime.mjs';
 import { ENGINE } from '../src/engine.mjs';
 import { Actions } from '../../asys-workers/src/actions.mjs';
@@ -213,7 +213,7 @@ for (const hasCheckpoint of [true, false]) {
     await until(() => f.runtime.record('run').status === 'failed' && !f.runtime.active.has('run'));
     const original = f.runtime.record('run');
     assert.ok(original.recovery?.definition);
-    if (!hasCheckpoint) { delete original.recovery; f.runtime.store.save(original); }
+    if (!hasCheckpoint) { delete original.recovery; await f.runtime.store.save(original); }
     const before = Object.values(original.jobs).find(job => job.activityId === 'before');
     const broken = Object.values(original.jobs).find(job => job.activityId === 'broken');
     await f.restart();
@@ -285,13 +285,13 @@ test('the new adapter rejects old-engine resume and recovery before changing sav
   f.runtime = new WorkflowRuntime({ store: new Store(f.state), environments: f.environments });
   const record = f.runtime.record('run');
   record.engine = 'bpmn-elements@17.3.0';
-  f.runtime.store.save(record);
+  await f.runtime.store.save(record);
   const jobs = await readdir(f.queue.jobs);
   const events = f.runtime.getEvents({ runId: 'run', limit: 1000 });
   await assert.rejects(f.runtime.resumeRun({ id: 'run' }), /requires workflow engine bpmn-elements@17\.3\.0/);
   assert.deepEqual(f.runtime.record('run'), record);
   record.status = 'running';
-  f.runtime.store.save(record);
+  await f.runtime.store.save(record);
   await assert.rejects(f.runtime.recover(), /requires workflow engine bpmn-elements@17\.3\.0/);
   assert.deepEqual(f.runtime.record('run'), record);
   assert.deepEqual(await readdir(f.queue.jobs), jobs);

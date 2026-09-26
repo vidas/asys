@@ -53,6 +53,7 @@ export class AdHoc {
   async publish(path, value) {
     const text = JSON.stringify(value);
     if (this.published.get(path) === text) return;
+    await this.execution.flush();
     await writeJSON(path, value);
     this.published.set(path, text);
   }
@@ -62,6 +63,7 @@ export class AdHoc {
     let outcome;
     const pending = this.execution.job(this.activity, this.message, (error, result) => { outcome = { error, result }; },
       AbortSignal.any([signal, jobAbort.signal]), { metadata: { actions: { version: 1, entries: this.entries } } });
+    pending.catch(error => { outcome = { error }; });
     try {
       for (;;) {
         signal.throwIfAborted();
@@ -87,6 +89,7 @@ export class AdHoc {
           const busy = this.children().filter(a => a.isRunning);
           if (this.scope.ordering !== 'Sequential' && this.scope.cancelRemainingInstances !== false) for (const child of busy) child.getApi().discard();
           if (!this.children().some(a => a.isRunning)) {
+            await this.execution.flush();
             callback(null, outcome?.result ?? null);
             return;
           }
@@ -96,6 +99,7 @@ export class AdHoc {
         await setTimeout(50, undefined, { signal });
       }
     } catch (error) {
+      if (this.execution.runtime.store.failure) throw error;
       if (!signal.aborted) callback(error);
     } finally {
       jobAbort.abort(new Error('Ad-hoc coordinator stopped'));
@@ -134,14 +138,15 @@ export class AdHoc {
         }
         if (!existing?.runContent) this.record.enabled[request.action]?.shift();
         this.record.actions[id] = { request: clone(request), status: 'starting', runContent };
-        this.execution.checkpoint();
+        await this.execution.checkpoint();
         activity.run({ ...runContent, message: clone(request.input ?? null), asysController: this.id, asysAction: id });
-        this.execution.checkpoint();
+        await this.execution.checkpoint();
       } catch (error) {
+        if (this.execution.runtime.store.failure) throw error;
         if (this.signal.aborted || this.execution.abort.signal.aborted) throw error;
         if (this.record.actions[id]?.status === 'running') throw error;
         this.record.actions[id] = { request: request ?? { id }, status: 'failed', error: error.message };
-        this.execution.checkpoint();
+        await this.execution.checkpoint();
       }
     }
   }

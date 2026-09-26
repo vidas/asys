@@ -4,7 +4,7 @@ import { lstatSync, realpathSync, statSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import Ajv from 'ajv';
 import { providerClient } from './provider.mjs';
-import { groupModels, streamProvider } from './provider-adapter.mjs';
+import { groupModels, listProviderModels, streamProvider } from './provider-adapter.mjs';
 import { systemModel } from './system-model.mjs';
 import { writeJSON } from './files.mjs';
 import { requiredString } from './values.mjs';
@@ -39,7 +39,11 @@ export async function swarmAgent({ job, argv = [], env = process.env, signal }, 
       prompt: input.mission, steps: 0, session } };
     save();
     const client = provider ?? providerClient(env);
-    const catalogue = await client.listModels({}, { signal: requestSignal, timeoutMs: 10000 });
+    const catalogue = await listProviderModels(client, { signal: requestSignal }, {
+      onRetry: ({ retryAt, ...data }) => event('agent.provider_retrying', { ...data, retryAt: retryAt.toISOString() }),
+      // Capacity retries remain owned by the swarm controller, as in inference.
+      onExhaustion() { throw new Error('Provider exhausted; swarm decision was not retried'); },
+    });
     requestSignal.throwIfAborted();
     const groups = groupModels(catalogue.models, {
       onInvalid: message => event('agent.model_unavailable', { message }),

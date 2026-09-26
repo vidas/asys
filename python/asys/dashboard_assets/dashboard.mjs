@@ -5,7 +5,7 @@ import {contentParts, outputRecords} from './content.mjs';
 import {Graph, layout as layoutGraph} from './dagre.mjs';
 import {readTheme,markAttributes} from './design.mjs';
 
-const TERMINAL = new Set(['completed', 'done', 'failed', 'cancelled', 'interrupted']);
+const TERMINAL = new Set(['completed', 'done', 'failed', 'cancelled', 'interrupted', 'recovery-required']);
 const KINDS = new Set(['agent', 'goal', 'senate', 'swarm', 'program', 'human']);
 export const theme = readTheme();
 export function workColor(kind) {
@@ -14,7 +14,7 @@ export function workColor(kind) {
 }
 export function active(status) { return !TERMINAL.has(status); }
 export function needsAttention(run) {
-  return ['failed', 'detached', 'unavailable', 'interrupted'].includes(run.status) || Boolean(run.error)
+  return ['failed', 'detached', 'unavailable', 'interrupted', 'degraded', 'recovering', 'recovery-required'].includes(run.status) || Boolean(run.error)
     || /waiting|human help|exhausted|unavailable|retry|failed/i.test(String(run.activity ?? run.detail ?? ''));
 }
 export function kindOf(value = {}) {

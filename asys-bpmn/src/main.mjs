@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { serveOutput, outputTarget } from '@dcomp/component';
-import { Store } from './store.mjs';
+import { AsyncStore } from './async-store.mjs';
 import { WorkflowRuntime } from './runtime.mjs';
 import { workflowServer } from './server.mjs';
 import { serveHostChannel } from './host-channel.mjs';
@@ -29,7 +29,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   process.once('SIGTERM', onSignal);
   let runtime, server, output, channel, stopHealth;
   try {
-    runtime = new WorkflowRuntime({ store: new Store(state), environments: new Environments(runtimeRoot) });
+    runtime = new WorkflowRuntime({ store: new AsyncStore(state), environments: new Environments(runtimeRoot) });
     // An explicit resume must replace unfinished jobs before execution starts.
     if (!awaitResume) await runtime.recover();
     server = workflowServer(runtime, { signal: shutdown.signal });
@@ -41,9 +41,9 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
       channelStopped = channel.then(() => { if (!shutdown.signal.aborted) throw new Error('Workflow host channel stopped'); });
       console.log(`Workflow host channel ${hostChannel} under ${runtimeRoot}`);
     }
-    stopHealth = heartbeat('/tmp/asys-bpmn-health');
+    stopHealth = heartbeat('/tmp/asys-bpmn-health', { ready: () => runtime.store.healthy() });
     console.log('Workflow component ready');
-    await Promise.race([stopped, failure, channelStopped, output.then(() => {
+    await Promise.race([stopped, failure, runtime.store.failed, channelStopped, output.then(() => {
       if (!shutdown.signal.aborted) throw new Error('Workflow output stopped');
     })]);
   } finally {
