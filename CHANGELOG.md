@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Default `asys init DIRECTORY` to `DIRECTORY/dcomp` and initialize it with the
+  requested shared group. Only an explicit `--dcomp` selects another directory;
+  the caller's existing environment and home directory no longer select it.
 - Require dcomp 0.3.2 or newer for its disconnected pending-connection fix.
   Pin the inference Go dependency to v0.3.2 and remove the copied Go source
   override so builds use the published module.

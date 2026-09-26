@@ -30,19 +30,19 @@ class InitTests(unittest.TestCase):
         return subprocess.run([sys.executable, str(ROOT / 'tools/asys'), 'init', *map(str, args)],
                               cwd=self.cwd, env=self.env, capture_output=True, text=True)
 
-    def test_init_writes_sourceable_environment_and_reuses_dcomp_selection(self):
+    def test_init_uses_local_dcomp_instead_of_the_active_setup(self):
         state = self.cwd / "state with 'quotes and $dollars"
         result = self.run_init(state)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertFalse(self.calls.exists())
+        self.assertEqual(json.loads(self.calls.read_text()), ['init', str(state / 'dcomp')])
         self.assertIn(f'source {shlex.quote(str(state / "asys-env"))}', result.stdout)
         self.assertFalse((self.cwd / 'asys-env').exists())
-        for child in ('runs', 'inference', 'human'):
+        for child in ('runs', 'inference', 'human', 'dcomp'):
             self.assertTrue((state / child).is_dir())
         output = subprocess.check_output(['bash', '-ec', 'source "$1"\nprintenv ASYS_STATE_ROOT DCOMP_STATE_ROOT',
                                          'bash', str(state / 'asys-env')],
                                          cwd=self.cwd, env=self.env, text=True)
-        self.assertEqual(output.splitlines(), [str(state), self.env['DCOMP_STATE_ROOT']])
+        self.assertEqual(output.splitlines(), [str(state), str(state / 'dcomp')])
         (state / 'keep').write_text('preserved')
         self.assertEqual(self.run_init(state).returncode, 0)
         self.assertEqual((state / 'keep').read_text(), 'preserved')
@@ -66,20 +66,34 @@ class InitTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(path.read_text(), 'my configuration\n')
 
-    def test_default_dcomp_uses_xdg_state_home(self):
+    def test_default_dcomp_ignores_xdg_state_home(self):
         self.env.pop('DCOMP_STATE_ROOT')
         self.env['XDG_STATE_HOME'] = str(self.cwd / 'xdg')
-        result = self.run_init(self.cwd / 'state')
+        state = self.cwd / 'state'
+        result = self.run_init(state)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(str(self.cwd / 'xdg/dcomp'), result.stdout)
-        self.assertFalse(self.calls.exists())
+        self.assertEqual(json.loads(self.calls.read_text()), ['init', str(state / 'dcomp')])
+        self.assertFalse((self.cwd / 'xdg').exists())
+
+    def test_default_dcomp_receives_the_shared_group(self):
+        group = grp.getgrgid(os.getgid()).gr_name
+        state = self.cwd / 'shared'
+        result = self.run_init(state, '--group', group)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(self.calls.read_text()),
+                         ['init', str(state / 'dcomp'), '--group', group])
+        self.assertEqual((state / 'asys-env').stat().st_mode & 0o777, 0o660)
 
     def test_failed_dcomp_init_does_not_publish_environment(self):
         self.dcomp.write_text('#!/bin/sh\necho "initialization failed" >&2\nexit 1\n')
-        result = self.run_init(self.cwd / 'state', '--dcomp', self.cwd / 'dcomp-state')
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('initialization failed', result.stderr)
-        self.assertFalse((self.cwd / 'state/asys-env').exists())
+        for explicit in (False, True):
+            with self.subTest(explicit=explicit):
+                state = self.cwd / ('explicit' if explicit else 'default')
+                args = ['--dcomp', self.cwd / 'dcomp-state'] if explicit else []
+                result = self.run_init(state, *args)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('initialization failed', result.stderr)
+                self.assertFalse((state / 'asys-env').exists())
 
     def test_group_init_preserves_contents_and_rejects_changing_private_state(self):
         group = grp.getgrgid(os.getgid()).gr_name

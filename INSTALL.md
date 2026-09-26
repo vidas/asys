@@ -61,14 +61,17 @@ directory. Asys does not change other products' configuration.
 ## Select state
 
 ```sh
-asys init ./state --dcomp ./dcomp-state
+asys init ./state
 source ./state/asys-env
 ```
 
 The script sets `ASYS_STATE_ROOT` and `DCOMP_STATE_ROOT` for this shell. Source
 it in each management or Human terminal. The asys root contains `runs/`,
-`inference/`, `human/` and `config.json`. Dcomp state and project workspaces are
-separate. Initialization preserves state and starts no services.
+`inference/`, `human/` and `config.json`. Initialization also prepares dcomp state
+under `./state/dcomp`, independent of `DCOMP_STATE_ROOT`, `XDG_STATE_HOME`, or the
+invoking user's home directory. Use `--dcomp DIRECTORY` to explicitly select
+another dcomp state directory. Project workspaces remain separate.
+Initialization preserves state and starts no services.
 
 Without an explicit root, host tools use `ASYS_STATE_ROOT`, then
 `XDG_STATE_HOME/asys`, then `~/.local/state/asys`. Their `--root DIRECTORY` has
@@ -78,11 +81,13 @@ commands take an environment directory and do not use state-root options.
 For an existing shared Unix group:
 
 ```sh
-asys init /srv/asys/host --dcomp /srv/asys/dcomp --group asys
+asys init /srv/asys/host --group asys
 source /srv/asys/host/asys-env
 ```
 
-Group members need Docker and workspace access. Initialization sets permissions
+The same group is passed to dcomp initialization, including for the default
+`/srv/asys/host/dcomp` directory. Group members need Docker and workspace access.
+Initialization sets permissions
 for new state; it does not recursively change existing directories. Shared state
 also shares control of configured services and their stored credentials.
 

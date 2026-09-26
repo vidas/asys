@@ -24,18 +24,20 @@ does not edit another agent product's settings or search paths.
 ## Initialize a setup
 
 ```sh
-asys init ./state --dcomp ./dcomp-state
+asys init ./state
 source ./state/asys-env
 ```
 
-This creates state and a selection script; it does not start services. Without
-`--dcomp`, it selects existing/default dcomp state. Use the same script in the
-Human terminal. `--group GROUP` initializes shared permissions for an existing
-Unix group; users also need workspace and Docker access. Existing permissions
-are not recursively repaired.
+This creates state and a selection script; it does not start services. Dcomp
+state defaults to `./state/dcomp`, independent of the current environment and
+the invoking user's home directory. Use `--dcomp DIRECTORY` to explicitly
+initialize or reuse another dcomp state directory. Use the same script in the
+Human terminal. `--group GROUP` initializes both asys and dcomp state with shared
+permissions for an existing Unix group; users also need workspace and Docker
+access. Existing permissions are not recursively repaired.
 
-The root contains `config.json`, `runs/`, `inference/`, `human/` and `asys-env`.
-Dcomp state and each project's workspace are separate directories.
+The root contains `config.json`, `runs/`, `inference/`, `human/` and `asys-env`,
+plus `dcomp/` by default. Each project's workspace is a separate directory.
 
 ## Start inference and select models
 

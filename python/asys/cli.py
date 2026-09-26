@@ -76,7 +76,8 @@ def arguments(argv):
 
     init = add_command(commands, 'init', initialize, 'Initialize asys state', validate=validate_init)
     init.add_argument('directory', type=Path, metavar='DIR')
-    init.add_argument('--dcomp', type=Path, metavar='DIR', help='initialize or reuse this dcomp state directory')
+    init.add_argument('--dcomp', type=Path, metavar='DIR',
+                      help='initialize or reuse this dcomp state directory (default: <asys directory>/dcomp)')
     init.add_argument('--group', metavar='GROUP', help='share new state with this Unix group')
 
     add_command(commands, 'update', update,
