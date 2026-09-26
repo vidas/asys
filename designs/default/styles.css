@@ -55,6 +55,20 @@ main>.selection-inspector{position:sticky;top:20px;align-self:start;max-height:c
 #close-inspector{display:none}
 .sequence>svg{flex:0 0 auto}
 .sequence{max-width:100%;scrollbar-gutter:stable}
+.workflow-section{border:1px solid var(--rail);border-top:2px solid var(--inchiostro);padding:12px 16px 0;margin-bottom:24px}
+.workflow-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.workflow-heading h3{font-size:18px}
+.workflow-controls{display:flex;align-items:center;gap:7px}
+.workflow-controls button{padding:4px 9px;min-width:32px;font-size:13px}
+.workflow-controls output{min-width:48px;text-align:center;font:12px var(--mono)}
+.workflow-help{margin:7px 0 10px;font-size:11px}
+.workflow-viewport{position:relative;width:100%;height:clamp(280px,46vh,520px);overflow:hidden;border:1px solid var(--rail);touch-action:none;cursor:grab}
+.workflow-viewport.is-panning,.workflow-viewport.is-panning [role=button]{cursor:grabbing!important}
+.workflow-viewport>.sequence{display:block;position:absolute;inset:0;width:100%;height:100%;padding:0;margin:0;overflow:hidden;scrollbar-gutter:auto;user-select:none}
+.workflow-viewport .sequence>svg{display:block;position:absolute;left:0;top:0;max-width:none;transform-origin:0 0}
+.workflow-section .symbol-legend{margin:12px 0;padding:0;border:0}
+.goal-content{max-height:clamp(180px,32vh,340px);overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;border:1px solid var(--rail);padding:12px 14px}
+#run-request{max-height:180px;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;overflow-wrap:anywhere}
 @media(max-width:1000px){main.has-selection{display:block}main>.selection-inspector{display:none;position:fixed;z-index:20;top:20px;right:20px;width:min(340px,calc(100vw - 40px));max-height:calc(100vh - 40px);background:var(--carta);border:1px solid var(--inchiostro);padding:18px}main.details-open>.selection-inspector{display:block}#close-inspector{display:block;margin-bottom:18px}}
 .output-record-body{padding:8px 0 14px 13px;font:14px/1.6 var(--font)}
 .output-record-body>.message-record{border-bottom:1px solid var(--campo);margin-bottom:10px}

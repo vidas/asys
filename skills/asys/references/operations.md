@@ -28,6 +28,11 @@ persists in the URL across refresh. Workflow diagrams show sequence flows,
 branches, return paths and recorded job state. Each worker kind has its own
 color; text states whether a task ran.
 
+The workflow opens fitted inside its own panel. Use +/− or the mouse wheel to
+zoom, drag to pan, and Fit to show the whole diagram again. With the diagram
+focused, arrow keys pan, +/− zoom, and Home or 0 fits. Live updates preserve
+your view. Long goals and run requests scroll within bounded text panels.
+
 Selecting a task opens its evidence. Programs use Output. Model conversation
 appears in Transcript, with individual saved sources available. JSON uses shared
 structured formatting and Plain text provides a terminal-style rendering.

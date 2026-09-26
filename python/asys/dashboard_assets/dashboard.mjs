@@ -4,6 +4,7 @@ import {mountSenate, senateParticipants} from './senate.mjs';
 import {contentParts, outputRecords} from './content.mjs';
 import {Graph, layout as layoutGraph} from './dagre.mjs';
 import {readTheme,markAttributes} from './design.mjs';
+import {mountWorkflowViewport} from './workflow-viewport.mjs';
 
 const TERMINAL = new Set(['completed', 'done', 'failed', 'cancelled', 'interrupted', 'recovery-required']);
 const KINDS = new Set(['agent', 'goal', 'senate', 'swarm', 'program', 'human']);
@@ -283,6 +284,10 @@ export function startDashboard(document, window) {
     systemFilter:new URL(window.location.href).searchParams.get('system')??'',senateParticipant:null,
     transcriptPayload:null,sourceContext:null,sourceId:null,sourceEpoch:0,sourcePending:null,sources:[],outputRecords:[],transcriptMessages:null,messagesNotice:''};
   const runRows = new Map(), jobRows = new Map(), eventRows = new Map(), outputRows = new Map(), messageRows = new Map();
+  const workflowViewport = mountWorkflowViewport($('#workflow-viewport'), {
+    zoomIn: $('#workflow-zoom-in'), zoomOut: $('#workflow-zoom-out'),
+    fitButton: $('#workflow-fit'), level: $('#workflow-zoom-level'),
+  });
   const api = async (path, options) => {
     const response = await window.fetch(path, options);
     const value = await response.json();
@@ -550,7 +555,7 @@ export function startDashboard(document, window) {
     $('#detail').hidden = !id;
     $('main').classList.toggle('has-selection',Boolean(id));$('#inspector').hidden=!id;$('#toggle-inspector').hidden=!id;
     $('#overview').classList.toggle('overview-compact',Boolean(id));$('#overview-toggle').hidden=!id;
-    if (!id) { renderRuns(); return; }
+    if (!id) { workflowViewport.clear(); renderRuns(); return; }
     text($('#run-title'), 'Loading run'); text($('#run-request'), '');
     $('#jobs').replaceChildren(); jobRows.clear(); $('#typed-view').replaceChildren(); $('#typed-view')._signature = undefined;
     setConsoleText('transcript','Loading worker transcript…');showConsole('transcript');$('#result-section').hidden=true;
@@ -656,7 +661,7 @@ export function startDashboard(document, window) {
   function renderWorkflow(workflow, jobs) {
     const nodes = workflow?.nodes ?? [];
     $('#workflow-section').hidden = !nodes.length;
-    if (!nodes.length) { $('#workflow').replaceChildren(); $('#workflow')._signature = undefined; return; }
+    if (!nodes.length) { $('#workflow').replaceChildren(); $('#workflow')._signature = undefined; workflowViewport.clear(); return; }
     changed($('#workflow'), [workflow, jobs.map(job => [job.id, job.status,job.kind]), state.jobId], () => {
       const layout = workflowLayout(nodes, [...(workflow.edges ?? []),...(workflow.attachments??[])]);
       const svg = (tag, attributes = {}, content) => {
@@ -705,6 +710,9 @@ export function startDashboard(document, window) {
       }
       return [root];
     });
+    const root = $('#workflow svg');
+    workflowViewport.update(root, {width: Number(root.getAttribute('width')), height: Number(root.getAttribute('height'))},
+      JSON.stringify([state.runId, workflow]));
   }
   function section(title, body) {
     const item = element('section', 'typed-section'); item.append(element('h4', null, title), body); return item;
@@ -730,7 +738,11 @@ export function startDashboard(document, window) {
   function typedView(kind, data, worker) {
     const result = [], checkpoint = data[kind] ?? {};
     if (kind === 'goal') {
-      if (checkpoint.goal) result.push(section('Goal', element('p', 'text-block', checkpoint.goal)));
+      if (checkpoint.goal) {
+        const content = element('p', 'text-block goal-content', checkpoint.goal);
+        content.tabIndex = 0; content.setAttribute('role', 'region'); content.setAttribute('aria-label', 'Goal');
+        result.push(section('Goal', content));
+      }
       if (checkpoint.sessions?.length) result.push(section('Attempts and verification', phases(checkpoint.sessions, false)));
     } else if (kind === 'senate') {
       result.push(section('Topic', element('p', 'text-block senate-topic', checkpoint.topic??'')));
@@ -757,8 +769,10 @@ export function startDashboard(document, window) {
     const activity=messageValue(job.detail??job.activity??job.error??'');
     changed($('#job-activity'),[job.id,activity],()=>[messageRecord(document,activity,
       activity!==null&&typeof activity==='object'?{label:'Activity',collapsed:true}:{})]);
+    const goalScroll = selectionChanged ? 0 : $('.goal-content')?.scrollTop ?? 0;
     changed($('#typed-view'), kind==='senate'?[kind,payload.worker]:[kind, data.goal, data.senate, data.result, data.command, data.input, data.swarm?.evaluation, payload.worker],
       () => typedView(kind, data, payload.worker));
+    if ($('.goal-content')) $('.goal-content').scrollTop = goalScroll;
     if(kind==='senate') {
       text($('.senate-topic'),data.senate?.topic??'');
       const mount=$('.senate-mount');mount._view??=mountSenate(mount,{onSelect:selectSenateParticipant});
@@ -1021,7 +1035,7 @@ export function startDashboard(document, window) {
     if (run !== state.runId || job !== state.jobId) selectRun(run, job);
   }
   window.addEventListener('hashchange', hashChanged);
-  function stop() { state.stopped = true; window.clearTimeout(state.timer); disposeWorld();for(const cleanup of selectionCleanup)cleanup(); }
+  function stop() { state.stopped = true; window.clearTimeout(state.timer); workflowViewport.dispose(); disposeWorld();for(const cleanup of selectionCleanup)cleanup(); }
   window.addEventListener('pagehide', stop, {once: true});
   const initial = new URLSearchParams(window.location.hash.slice(1));
   state.runId = initial.get('run'); state.jobId = initial.get('job');

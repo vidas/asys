@@ -142,7 +142,7 @@ test('real browser: unified views, isolated execution controls, replay and rende
       }
       if(path==='/'||path.startsWith('/assets/')) {
         const name=path==='/'?'index.html':path.slice(8);
-        if(!['index.html','dashboard.css','dashboard.mjs','design.mjs','console-selection.mjs','markdown.mjs','marked.mjs','content.mjs','senate.mjs','dagre.mjs'].includes(name)){res.writeHead(404).end();return;}
+        if(!['index.html','dashboard.css','dashboard.mjs','workflow-viewport.mjs','design.mjs','console-selection.mjs','markdown.mjs','marked.mjs','content.mjs','senate.mjs','dagre.mjs'].includes(name)){res.writeHead(404).end();return;}
         res.setHeader('Content-Type',name.endsWith('.mjs')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');
         let content=await readFile(join(assets,name),'utf8');
         if(path==='/'&&customDesign)content=content.replace('<!-- custom-design -->','<link rel="stylesheet" href="/custom.css">');
@@ -414,5 +414,130 @@ test('real browser: unified views, isolated execution controls, replay and rende
       }
     }
   }
+  await cdp.send('Browser.close');
+});
+
+test('real browser: workflow fit, zoom and pan survive live updates; long goals scroll independently', {
+  skip:process.env.ASYS_DASHBOARD_BROWSER!=='1'||!existsSync(chrome), timeout:35000,
+},async t=>{
+  const root=await mkdtemp(join(tmpdir(),'asys-dashboard-viewport-'));
+  const assets=fileURLToPath(new URL('../python/asys/dashboard_assets/',import.meta.url));
+  const goal='Repair the clock\n'+Array.from({length:100},(_,i)=>`Requirement ${i}: preserve the recorded evidence and verify the resulting clock behavior.`).join('\n');
+  const run={id:'large',name:'Large workflow',system:'lab',environment:'tools',status:'running',elapsed:'2m',
+    request:Array.from({length:40},(_,i)=>`Request detail ${i}: keep this complete request available.`).join('\n'),jobs:{active:2,total:2}};
+  const jobs=[{id:'g',kind:'goal',type:'repair',name:'Repair',status:'running',metadata:{bpmn:{id:'goal'}}},
+    {id:'a',kind:'agent',type:'inspect',name:'Inspect',status:'running',metadata:{bpmn:{id:'agent'}}}];
+  const nodes=Array.from({length:24},(_,i)=>({id:i===0?'goal':i===1?'agent':`step-${i}`,name:`Engineering step ${i+1}`,type:'serviceTask'}));
+  const workflow={nodes,edges:[...nodes.slice(1).map((node,i)=>({source:nodes[i].id,target:node.id})),{source:nodes.at(-1).id,target:nodes[2].id}]};
+  let sessionStatus='running',detailPolls=0;
+  const server=createServer(async(req,res)=>{
+    try {
+      const path=new URL(req.url,'http://localhost').pathname;
+      if(path==='/'||path.startsWith('/assets/')) {
+        const name=path==='/'?'index.html':path.slice(8);
+        if(!['index.html','dashboard.css','dashboard.mjs','workflow-viewport.mjs','design.mjs','console-selection.mjs','markdown.mjs','marked.mjs','content.mjs','senate.mjs','dagre.mjs'].includes(name)){res.writeHead(404).end();return;}
+        res.setHeader('Content-Type',name.endsWith('.mjs')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');
+        res.end(await readFile(join(assets,name)));return;
+      }
+      if(path.startsWith('/design/default/')) {
+        const name=path.slice('/design/default/'.length);
+        if(!['styles.css','logo.svg'].includes(name)){res.writeHead(404).end();return;}
+        res.setHeader('Content-Type',name.endsWith('.css')?'text/css':'image/svg+xml');
+        res.end(await readFile(new URL('../designs/default/'+name,import.meta.url)));return;
+      }
+      res.setHeader('Content-Type','application/json');
+      let payload;
+      if(path==='/api/runs')payload={scope:'Viewport fixture',runs:[run]};
+      else if(path==='/api/runs/large'){detailPolls++;payload={run,jobs,workflow};}
+      else if(/^\/api\/runs\/large\/jobs\/[ga]$/.test(path)) {
+        const job=jobs.find(item=>path.endsWith('/'+item.id));
+        payload={job,kind:job.kind,worker:{kind:job.kind},transcript:{text:'Saved response'},data:job.kind==='goal'?{goal:{goal,
+          sessions:[{attempt:1,phase:'verify',status:sessionStatus,result:{final:sessionStatus==='running'?'Verification started':'Verification complete'}}]}}:{}};
+      }else {res.writeHead(404).end(JSON.stringify({error:'missing fixture '+path}));return;}
+      res.end(JSON.stringify(payload));
+    }catch(error){res.writeHead(500).end(JSON.stringify({error:error.message}));}
+  });
+  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
+  const child=spawn(chrome,['--headless=new','--ozone-platform=headless','--no-sandbox','--disable-gpu','--disable-dev-shm-usage',
+    '--no-first-run','--no-default-browser-check','--remote-debugging-pipe',`--user-data-dir=${root}/chrome`,'about:blank'],
+  {stdio:['ignore','ignore','pipe','pipe','pipe'],env:{...process.env,DISPLAY:'',WAYLAND_DISPLAY:'',
+    XAUTHORITY:join(root,'no-display-authority'),XDG_CONFIG_HOME:join(root,'config'),XDG_CACHE_HOME:join(root,'cache')}});
+  let errors='';child.stderr.on('data',chunk=>errors+=chunk);
+  t.after(async()=>{child.kill('SIGKILL');child.stdio[3].destroy();child.stdio[4].destroy();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await rm(root,{recursive:true,force:true,maxRetries:8,retryDelay:100});});
+  const cdp=new CDP(child),{targetId}=await cdp.send('Target.createTarget',{url:'about:blank'});
+  const {sessionId}=await cdp.send('Target.attachToTarget',{targetId,flatten:true});
+  const evaluate=async expression=>{
+    const result=await cdp.send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true},sessionId);
+    if(result.exceptionDetails)throw Error(JSON.stringify(result.exceptionDetails));return result.result.value;
+  };
+  const waitFor=async expression=>{
+    const deadline=Date.now()+7000;
+    while(!await evaluate(expression)){if(Date.now()>deadline)throw Error(`Browser condition failed: ${expression}\n${await evaluate('document.body.innerText')}\n${errors}`);await new Promise(resolve=>setTimeout(resolve,40));}
+  };
+  const view=()=>evaluate(`(()=>{const svg=document.querySelector('#workflow svg'),v=document.querySelector('#workflow-viewport').getBoundingClientRect(),m=svg.getScreenCTM();return [m.a,m.b,m.c,m.d,m.e-v.left,m.f-v.top]})()`);
+  const assertView=(actual,expected,message)=>assert.ok(actual.every((value,i)=>Math.abs(value-expected[i])<0.01),`${message}: ${JSON.stringify(actual)} vs ${JSON.stringify(expected)}`);
+  const fitted=`(()=>{const svg=document.querySelector('#workflow svg');if(!svg)return false;const v=document.querySelector('#workflow-viewport').getBoundingClientRect(),b=svg.getBBox(),m=svg.getScreenCTM();const points=[[b.x,b.y],[b.x+b.width,b.y+b.height]].map(([x,y])=>new DOMPoint(x,y).matrixTransform(m));return points.every(p=>p.x>=v.left-1&&p.x<=v.right+1&&p.y>=v.top-1&&p.y<=v.bottom+1)})()`;
+  const nodePoint=selector=>evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+  const mouse=(type,point,extra={})=>cdp.send('Input.dispatchMouseEvent',{type,...point,...extra},sessionId);
+  const click=async selector=>{const point=await nodePoint(selector);await mouse('mouseMoved',point);await mouse('mousePressed',point,{button:'left',buttons:1,clickCount:1});await mouse('mouseReleased',point,{button:'left',buttons:0,clickCount:1});};
+  await cdp.send('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false},sessionId);
+  await cdp.send('Page.navigate',{url:`http://127.0.0.1:${server.address().port}/#run=large&job=a`},sessionId);
+  await waitFor('document.querySelectorAll("#workflow [data-node]").length===24 && document.querySelector("#job-title").textContent==="Inspect"');
+  await evaluate('document.querySelector("#workflow-viewport").scrollIntoView({block:"center"})');
+  await waitFor(fitted);
+  const panel=await evaluate(`(()=>{const p=document.querySelector('#workflow-viewport'),s=getComputedStyle(p);return {height:p.clientHeight,border:parseFloat(s.borderTopWidth),width:p.clientWidth,body:document.documentElement.scrollWidth,window:innerWidth}})()`);
+  assert.ok(panel.height>=180&&panel.height<=650,'workflow panel has a useful bounded height');
+  assert.ok(panel.border>0,'workflow viewport is visibly bordered');
+  assert.ok(panel.width>300&&panel.body<=panel.window,'large graph does not widen the page');
+  const initial=await view(),initialLevel=await evaluate('document.querySelector("#workflow-zoom-level").textContent');
+  assert.ok(initial[0]<0.5,'large workflow initially fits at a reduced scale');
+  await click('#workflow-zoom-in');
+  const enlarged=await view();assert.ok(enlarged[0]>initial[0],'zoom in increases the graph scale');
+  assert.notEqual(await evaluate('document.querySelector("#workflow-zoom-level").textContent'),initialLevel,'zoom level reflects the changed scale');
+  await click('#workflow-zoom-out');
+  assert.ok((await view())[0]<enlarged[0],'zoom out decreases the graph scale');
+  await click('#workflow-fit');await waitFor(fitted);assertView(await view(),initial,'Fit restores the full graph');
+  const start=await nodePoint('#workflow [data-node=goal] .workflow-node-hit'),pageBefore=await evaluate('scrollY');
+  await mouse('mouseMoved',start);await mouse('mousePressed',start,{button:'left',buttons:1,clickCount:1});
+  await mouse('mouseMoved',{x:start.x+35,y:start.y+28},{button:'left',buttons:1});
+  await mouse('mouseReleased',{x:start.x+35,y:start.y+28},{button:'left',buttons:0,clickCount:1});
+  const panned=await view();
+  assert.ok(Math.abs(panned[4]-initial[4])>=30&&Math.abs(panned[5]-initial[5])>=23,'pointer drag pans the graph in both directions');
+  assert.equal(await evaluate('document.querySelector("#job-title").textContent'),'Inspect','dragging from a task must not select it');
+  assert.equal(await evaluate('scrollY'),pageBefore,'panning does not move the page');
+  await click('#workflow [data-node=goal] .workflow-node-hit');
+  await waitFor('document.querySelector("#job-title").textContent==="Repair" && !!document.querySelector(".goal-content")');
+  assertView(await view(),panned,'selecting a task preserves the viewport');
+  await evaluate('document.querySelector("#workflow [data-node=agent]").focus({preventScroll:true})');
+  await cdp.send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13},sessionId);
+  await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13},sessionId);
+  await waitFor('document.querySelector("#job-title").textContent==="Inspect"');
+  assertView(await view(),panned,'keyboard task selection preserves the viewport');
+  const pollsBefore=detailPolls;jobs[0].status='completed';
+  await waitFor('document.querySelector("#workflow [data-node=goal]").getAttribute("aria-label").includes("completed")');
+  assert.ok(detailPolls>pollsBefore,'status change came through a live poll');
+  assertView(await view(),panned,'a status redraw preserves the viewport');
+  await evaluate('document.querySelector("[data-job=g]").click()');
+  await waitFor('!!document.querySelector(".goal-content")');
+  const prose=await evaluate(`(()=>{const p=document.querySelector('.goal-content'),r=document.querySelector('#run-request');return {text:p.textContent,height:p.clientHeight,full:p.scrollHeight,overflow:getComputedStyle(p).overflowY,requestHeight:r.clientHeight,requestFull:r.scrollHeight}})()`);
+  assert.equal(prose.text,goal,'complete goal content remains available');
+  assert.ok(prose.height>80&&prose.height<=500&&prose.full>prose.height,'long goal has bounded vertical scrolling');
+  assert.match(prose.overflow,/auto|scroll/);
+  assert.ok(prose.requestHeight<=350&&prose.requestFull>prose.requestHeight,'long run request is also bounded');
+  await evaluate('document.querySelector(".goal-content").scrollIntoView({block:"center"});document.querySelector(".goal-content").scrollTop=220');
+  const goalScroll=await evaluate('({goal:document.querySelector(".goal-content").scrollTop,page:scrollY})');
+  assert.ok(goalScroll.goal>0,'goal can be read by scrolling inside its panel');
+  sessionStatus='completed';
+  await waitFor('document.querySelector("#typed-view").textContent.includes("Verification complete")');
+  assert.deepEqual(await evaluate('({goal:document.querySelector(".goal-content").scrollTop,page:scrollY})'),goalScroll,'new verification sessions preserve the goal reading position and page scroll');
+  assertView(await view(),panned,'goal checkpoint updates preserve the workflow viewport');
+  if(process.env.ASYS_DASHBOARD_SCREENSHOTS){const shot=await cdp.send('Page.captureScreenshot',{format:'png'},sessionId);await writeFile(join(process.env.ASYS_DASHBOARD_SCREENSHOTS,'dashboard-bounded-goal.png'),Buffer.from(shot.data,'base64'));}
+  await evaluate('document.querySelector("#workflow-viewport").scrollIntoView({block:"center"})');
+  await click('#workflow-fit');await waitFor(fitted);
+  if(process.env.ASYS_DASHBOARD_SCREENSHOTS){const shot=await cdp.send('Page.captureScreenshot',{format:'png'},sessionId);await writeFile(join(process.env.ASYS_DASHBOARD_SCREENSHOTS,'dashboard-workflow-fit.png'),Buffer.from(shot.data,'base64'));}
+  await cdp.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true},sessionId);
+  await evaluate('document.querySelector("#workflow-viewport").scrollIntoView({block:"center"});document.querySelector("#workflow-fit").click()');
+  await waitFor(fitted);
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true,'bounded workflow remains inside the mobile page');
   await cdp.send('Browser.close');
 });

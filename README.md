@@ -104,6 +104,9 @@ and saved swarm frames. Each worker kind has a distinct color. Selection opens
 shared details without displacing the map. Display freeze and execution controls
 are separate actions.
 
+Workflow diagrams open fitted inside a bounded panel, with zoom controls and
+drag-to-pan navigation. Long goals scroll within their own text panel.
+
 The [default design](designs/default/) is a separate package with shared CSS,
 logo assets, fonts and diagram symbols. [Create an alternative design](skills/asys-authoring/references/design.md)
 from a visual specification without changing execution or dashboard code.
