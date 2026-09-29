@@ -49,7 +49,12 @@ A workflow sequences those bindings:
 ```sh
 asys-run ./env/development ./workflow.bpmn --input request.md --workspace ./project
 asys-run --resume RUN
+asys-run --upgrade RUN
 ```
+
+After installing new execution code, `--upgrade` drains a workflow's existing
+jobs and replaces its owned execution components while preserving job IDs and
+outcomes. See [workflow upgrades](skills/asys/references/operations.md#upgrade-a-running-workflow).
 
 [The mixed-review example](asys-bpmn/examples/mixed-review/) combines a single
 agent, two model swarms, a verified goal, a program checking their shared files,

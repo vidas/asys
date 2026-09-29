@@ -28,12 +28,14 @@ from .worker_definitions import builtin_definition, definition_command, load_def
 def arguments(argv):
     parser = argparse.ArgumentParser(prog='asys-run', allow_abbrev=False,
         description='Run a named worker or a BPMN workflow in the selected environment.',
-        usage='%(prog)s ENVIRONMENT WORKER|WORKFLOW.bpmn [REQUEST] [OPTIONS]\n       %(prog)s --resume RUN [--root DIRECTORY] [--human]')
+        usage='%(prog)s ENVIRONMENT WORKER|WORKFLOW.bpmn [REQUEST] [OPTIONS]\n       %(prog)s --resume RUN [--root DIRECTORY] [--human]\n       %(prog)s --upgrade RUN [--root DIRECTORY] [--human]')
     parser.add_argument('environment', type=Path, nargs='?', metavar='ENVIRONMENT')
     parser.add_argument('worker', nargs='?', metavar='WORKER|WORKFLOW.bpmn')
     parser.add_argument('request', nargs='?', metavar='REQUEST')
     parser.add_argument('--input', metavar='FILE', help='read the Markdown request from a file; - reads stdin')
-    parser.add_argument('--resume', metavar='RUN', help='resume a failed or recovery-required workflow using its saved state')
+    maintenance = parser.add_mutually_exclusive_group()
+    maintenance.add_argument('--resume', metavar='RUN', help='resume a failed or recovery-required workflow using its saved state')
+    maintenance.add_argument('--upgrade', metavar='RUN', help='drain a workflow, rebuild its environment and recover on the installed images')
     parser.add_argument('--model', metavar='MODEL', help='override a named worker model for this run')
     parser.add_argument('--parameters', type=Path, metavar='FILE', help='JSON parameters accepted by a named worker')
     parser.add_argument('--name', metavar='NAME', help='name displayed for this run')
@@ -44,13 +46,14 @@ def arguments(argv):
     parser.set_defaults(workspace=None, system=None, link=None)
     args = parser.parse_intermixed_args(argv)
     args.workflow = None
-    args.command = 'resume' if args.resume else 'run'
-    if args.resume:
+    args.command = 'upgrade' if args.upgrade else 'resume' if args.resume else 'run'
+    if args.resume or args.upgrade:
+        option = '--upgrade' if args.upgrade else '--resume'
         if any(value is not None for value in (args.environment,args.worker,args.request,args.input,args.model,args.parameters,args.name)) or args.process:
-            parser.error('--resume uses the saved run; do not supply a new environment, worker, request or configuration')
+            parser.error(f'{option} uses the saved run; do not supply a new environment, worker, request or configuration')
         if any(getattr(args, name) is not None for name in ('workspace','system','link','dcomp_state_root','runtime_root')):
-            parser.error('--resume restores the saved workspace, system and connections; only --root and --human can be supplied')
-        args.run = args.resume
+            parser.error(f'{option} restores the saved workspace, system and connections; only --root and --human can be supplied')
+        args.run = args.upgrade or args.resume
         return args
     args.workspace = args.workspace or Path.cwd()
     args.system = args.system or 'asys'
@@ -285,7 +288,7 @@ class Run(SingleJob):
 
 def main(argv=None):
     args = arguments(sys.argv[1:] if argv is None else argv)
-    if args.workflow is not None or args.resume:
+    if args.workflow is not None or args.resume or args.upgrade:
         from .workflow import run as run_workflow
         return run_workflow(args)
     if args.input is not None:

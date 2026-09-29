@@ -6,6 +6,7 @@
 asys-run ENVIRONMENT WORKER [REQUEST] [OPTIONS]
 asys-run ENVIRONMENT WORKFLOW.bpmn [REQUEST] [OPTIONS]
 asys-run --resume RUN [--root DIRECTORY] [--human]
+asys-run --upgrade RUN [--root DIRECTORY] [--human]
 asys-workers list ENVIRONMENT [--json]
 asys-workers add ENVIRONMENT KIND NAME [--file FILE]
 asys-workers describe ENVIRONMENT NAME
@@ -33,14 +34,18 @@ a workflow may omit it if its tasks do not use the `request` variable.
 | `--model MODEL` | Named-worker model override; configure workflow models in definitions |
 | `--parameters FILE` | Named-worker JSON parameters: agent `maxSteps`, goal `maxAttempts` |
 | `--process ID` | Select an executable process in a BPMN document |
-| `--human` | Workflow terminal with a private Human service; also valid on resume |
+| `--human` | Workflow terminal with a private Human service; resume/upgrade can attach its saved private service |
 | `--system NAME` | Dcomp namespace; default `asys` |
 | `--dcomp-state-root DIRECTORY` | Dcomp state; default `DCOMP_STATE_ROOT` or dcomp default |
 | `--runtime-root DIRECTORY` | Dcomp proxy/socket directory; default chosen by dcomp |
 | `-L INPUT=TARGET`, `--link INPUT=TARGET` | Repeatable input connection: `COMPONENT.OUTPUT`, `@GLOBAL`, or `-` |
 
-Resume restores saved configuration and accepts only `--root` and `--human`.
-It rejects a new environment, workspace, request, model, system or connection.
+Resume and upgrade restore saved configuration and accept only `--root` and
+`--human`. They reject a new environment, workspace, request, model, system or
+connection. Upgrade drains existing jobs, replaces owned execution components
+and recovers their saved outcomes without retrying failures. See
+[workflow upgrades](operations.md#upgrade-a-running-workflow) for prerequisites
+and interruption behavior.
 Stdin cannot supply both `--input -` and interactive `--human` answers.
 
 ## Configuration and observation

@@ -18,6 +18,7 @@ from .execution import EnvironmentHost, execution_options, prepare_run
 from .human import HumanHandler
 from .workflow_runs import Runs, component_names, workflow_name
 from .workflow_journal import WorkflowHistory, agent_notices
+from .upgrade import UpgradeHandover, finish_upgrade, handover_if_requested, pending_upgrade, prepare_upgrade
 
 SERVICE = "asys.workflow.v1.Workflow"
 CHANNEL = "workflow"
@@ -42,7 +43,9 @@ class Launcher(EnvironmentHost):
         self.outbound = None
         self.record = {}
         self.lease = None
-        self.save_record = args.command != "resume"
+        self.save_record = args.command not in {"resume", "upgrade"}
+        self.upgrade_in_progress = False
+        self.upgrade_handover = False
         self.human = None
         self.console_errors = []
         self.reattach_result = None
@@ -62,12 +65,15 @@ class Launcher(EnvironmentHost):
     def snapshot(self):
         if not self.save_record:
             return
+        self.record['upgrade_protocol'] = 1
         self.record["updated_at"] = timestamp()
         if self.record.get("status") in TERMINAL:
             self.record.setdefault("finished_at", self.record["updated_at"])
         write_json(self.directory / "run.json", self.record)
 
     def setup(self):
+        if self.args.command == "upgrade":
+            return prepare_upgrade(self)
         if self.args.command == "resume":
             return self.setup_resume()
         args = self.args
@@ -118,6 +124,8 @@ class Launcher(EnvironmentHost):
 
     def setup_resume(self):
         directory = Runs(state_root('runs', root=self.args.root)).select(self.args.run)
+        if pending_upgrade(directory):
+            raise LaunchError(f'This run has an unfinished upgrade; continue with asys-run --upgrade {self.args.run}')
         if shared(directory):
             os.umask(0o007)
         lease = (directory / "launcher.lock").open("a+b")
@@ -127,6 +135,8 @@ class Launcher(EnvironmentHost):
             lease.close()
             raise LaunchError("This run already has an active launcher") from None
         self.lease = lease
+        if pending_upgrade(directory):
+            raise LaunchError(f'This run has an unfinished upgrade; continue with asys-run --upgrade {self.args.run}')
         record = read_object(directory / "run.json")
         if record.get("status") not in {"failed", "recovery-required"}:
             raise LaunchError(f"Cannot resume a {record.get('status', 'unknown')} run; select a failed or recovery-required run")
@@ -319,7 +329,7 @@ class Launcher(EnvironmentHost):
     def execute(self):
         inbound = Writer(direction_root(self.directory / "runtime", CHANNEL, "in"))
         self.outbound = Reader(direction_root(self.directory / "runtime", CHANNEL, "out"))
-        resuming = self.args.command == "resume"
+        resuming = self.args.command in {"resume", "upgrade"}
         after = (self.outbound.cursor if self.reattaching else
                  max(self.outbound.sequences(), default=0) if resuming else 0)
         history = WorkflowHistory(self.directory)
@@ -357,6 +367,7 @@ class Launcher(EnvironmentHost):
                     notices.add(key)
         next_health_check = time.monotonic() + 2
         with (self.directory / "events.jsonl").open("a") as events_file:
+            finish_upgrade(self)
             while True:
                 self.check_interrupt()
                 events, after = self.events(after)
@@ -400,6 +411,7 @@ class Launcher(EnvironmentHost):
                     # result event. The fresh status reply carries durable data.
                     self.report_result({'data': self.reattach_result})
                     return
+                handover_if_requested(self)
                 if time.monotonic() >= next_health_check:
                     if self.human:
                         self.human.check()
@@ -412,6 +424,14 @@ class Launcher(EnvironmentHost):
             if self.lease:
                 self.lease.close()
             return True
+        if self.upgrade_in_progress or self.upgrade_handover:
+            # Maintenance interruption leaves the workflow checkpoint and any
+            # draining jobs intact, even when the command received SIGINT.
+            clean = self.stop_human(preserve=True)
+            self.snapshot()
+            if self.lease:
+                self.lease.close()
+            return clean
         cancelled = self.record.get('status') == 'cancelled' or self.interrupted.is_set()
         # Only an explicit interruption cancels BPMN execution. On component
         # failure, preserve its last checkpoint for resume, even if the engine
@@ -461,13 +481,19 @@ def run(args):
     try:
         launcher.setup()
         launcher.execute()
+    except UpgradeHandover:
+        launcher.say('Workflow monitoring handed over to the upgrade command')
     except Interrupted:
-        launcher.say("Cancelling workflow")
-        launcher.record["status"] = "cancelled"
+        if launcher.upgrade_in_progress:
+            launcher.say(f'Upgrade interrupted; work is preserved. Continue with asys-run --upgrade {launcher.id}')
+            launcher.record.update(status='recovery-required', error='Upgrade interrupted; rerun asys-run --upgrade to continue')
+        else:
+            launcher.say("Cancelling workflow")
+            launcher.record["status"] = "cancelled"
         code = 130
     except (LaunchError, OSError, ValueError, KeyError) as error:
         launcher.say(f"error: {error}")
-        launcher.record.update(status="recovery-required" if isinstance(error, RecoveryRequired) else "failed", error=str(error))
+        launcher.record.update(status="recovery-required" if launcher.upgrade_in_progress or isinstance(error, RecoveryRequired) else "failed", error=str(error))
         code = 1
     finally:
         try:

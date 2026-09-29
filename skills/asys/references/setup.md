@@ -83,9 +83,31 @@ or running state.
 
 ## Update
 
-Install with the same prefix, load the selected `asys-env`, then run `asys update`.
-This refreshes shared services without restarting active workflow workers.
-New runs and resume rebuild environments against installed base images.
+`make build` builds commands and images. `make install` builds and installs all
+host tools; `make install-host` installs core host files and skills without
+building images or installing the inference/Human host tools. Keep the original
+installation prefix. These actions leave existing containers on their original
+images.
+
+For workflow/runtime changes with unchanged shared services:
+
+```sh
+make -C asys-bpmn build
+make install-host PREFIX=/path/to/original/prefix
+source /path/to/state/asys-env
+asys-run --upgrade RUN
+```
+
+The BPMN build also builds its worker, runtime and world image dependencies.
+Upgrade drains existing jobs, rebuilds the saved environment against installed
+base images, then recovers the same workflow and job outcomes. See
+[workflow upgrades](operations.md#upgrade-a-running-workflow) before operating
+an existing run. New runs and cold checkpoint resume also rebuild environments.
+
+To refresh shared inference/Human services, source the selected `asys-env` and
+run `asys update` separately. It can replace shared services while workflow
+workers remain running; it does not upgrade those workers.
+
 The 0.2.0 installer removes specialized host launchers; use `asys-run` throughout.
 Existing 0.1.x `workers.json` command bindings and `agents/` instructions stay in
 place. Named worker definitions are the authoring format for new workers; there

@@ -58,16 +58,21 @@ class ArgumentTests(unittest.TestCase):
         self.assertEqual(arguments(['logs', '--source', 'components']).lines, 50)
         self.assertEqual(arguments(['logs', 'latest', 'worker']).lines, 50)
 
-    def test_resume_rejects_new_execution_configuration(self):
+    def test_resume_and_upgrade_reject_new_execution_configuration(self):
         from asys.run import arguments as run_arguments
-        for extra in (['--workspace', '/new'], ['--system', 'new'], ['--model', 'account/model'],
-                      ['--dcomp-state-root', '/new'], ['--runtime-root', '/new'], ['-L', 'inference=@new'],
-                      ['env', 'worker', 'request'], ['--parameters', 'limits.json'], ['--input', 'new.md']):
-            with self.subTest(extra=extra), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
-                run_arguments(['--resume', 'saved', *extra])
-            self.assertEqual(error.exception.code, 2)
-        args = run_arguments(['--resume', 'saved', '--root', '/state', '--human'])
-        self.assertEqual((args.run, args.root, args.human), ('saved', Path('/state'), True))
+        for option in ['--resume', '--upgrade']:
+            for extra in (['--workspace', '/new'], ['--system', 'new'], ['--model', 'account/model'],
+                          ['--dcomp-state-root', '/new'], ['--runtime-root', '/new'], ['-L', 'inference=@new'],
+                          ['env', 'worker', 'request'], ['--parameters', 'limits.json'], ['--input', 'new.md']):
+                with self.subTest(option=option, extra=extra), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
+                    run_arguments([option, 'saved', *extra])
+                self.assertEqual(error.exception.code, 2)
+            args = run_arguments([option, 'saved', '--root', '/state', '--human'])
+            self.assertEqual((args.run, args.root, args.human, args.command),
+                             ('saved', Path('/state'), True, option[2:]))
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
+            run_arguments(['--resume', 'saved', '--upgrade', 'saved'])
+        self.assertEqual(error.exception.code, 2)
 
     def test_init_accepts_intermixed_options_and_uses_its_directory_argument(self):
         args = arguments(['init', '--group', 'asys', '/state', '--dcomp', '/dcomp'])

@@ -48,6 +48,10 @@ test('host health recovery is bounded and preserves running jobs and unrelated c
   await exec('python3', [fileURLToPath(new URL('./health_recovery.py', import.meta.url))]);
 });
 
+test('workflow upgrades preserve outcomes and safely continue interrupted maintenance', async () => {
+  await exec('python3', [fileURLToPath(new URL('./upgrade.py', import.meta.url))]);
+});
+
 test('update selects running shared services without changing workflow runs', async () => {
   await exec('python3', [fileURLToPath(new URL('./update.py', import.meta.url))]);
 });

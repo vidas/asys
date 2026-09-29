@@ -30,7 +30,7 @@ an inference account.
 | Command | Purpose |
 | --- | --- |
 | `asys` | Initialize state, set models, inspect runs, dashboard, update and skill export |
-| `asys-run` | Execute a named worker or BPMN workflow; resume failed workflows |
+| `asys-run` | Execute workers/workflows, resume failed workflows or upgrade workflow components |
 | `asys-workers` | List/add/describe/edit worker definitions in an environment |
 | `asys-environment` | Import skills/Dockerfiles and edit environment files |
 | `asys-inference` | Configure and operate the provider network |
@@ -133,6 +133,36 @@ can queue requests before a terminal attaches. Workflow `--human` instead owns
 a private handler for that run. See [setup](skills/asys/references/setup.md) and
 [Human authoring](skills/asys-authoring/references/human.md).
 
+## Update execution code
+
+Building or installing code leaves existing containers running their original
+images. Choose the action for the components being updated:
+
+| Action | Effect |
+| --- | --- |
+| `make build` | Build host commands and execution images without installing host files |
+| `make install` | Build images and install core, inference and Human host tools |
+| `make install-host` | Install core host files and skills without building images or installing inference/Human host tools |
+| `asys update` | Refresh shared inference and Human services from installed code/images |
+| `asys-run --upgrade RUN` | Drain and replace one workflow's owned execution components |
+
+For workflow/runtime changes with unchanged shared services, build the BPMN
+image and its worker/runtime/world dependencies, then install the core host
+tools using the original prefix:
+
+```sh
+make -C asys-bpmn build
+make install-host PREFIX=/path/to/original/prefix
+source /path/to/state/asys-env
+asys-run --upgrade RUN
+```
+
+The run upgrade rebuilds its saved environment against the installed base
+images and retains its workspace, saved BPMN, connections and model defaults.
+It leaves shared services untouched; `asys update` is a separate operation that
+can replace those services. See [workflow upgrades](skills/asys/references/operations.md#upgrade-a-running-workflow)
+for compatibility, launcher handover and interruption behavior.
+
 ## Upgrade to 0.2.0
 
 Finish active work before replacing services or changing definition formats.
@@ -153,6 +183,7 @@ copies installed under other prefixes are not changed. All new execution uses:
 asys-run ENVIRONMENT WORKER REQUEST
 asys-run ENVIRONMENT WORKFLOW.bpmn --input FILE
 asys-run --resume RUN
+asys-run --upgrade RUN
 asys-workers COMMAND ENVIRONMENT ...
 asys-environment COMMAND ENVIRONMENT ...
 ```
@@ -168,9 +199,11 @@ Observe everything with `asys dashboard`, `status`, `logs` or `top`.
 Keep old saved evidence. Recovery still requires compatible engine checkpoints;
 [engine compatibility](asys-bpmn/ENGINE.md) describes that boundary.
 
-`asys update` refreshes running shared services, not current workflow workers.
-New runs and resume rebuild environments. Skill exports are not overwritten by
-installation; deliberately refresh copied skills after reviewing local edits.
+`asys update` refreshes running shared services. Use `asys-run --upgrade RUN` to
+replace an existing workflow's execution components after draining its jobs.
+New runs and cold checkpoint resume rebuild environments. Skill exports are not
+overwritten by installation; deliberately refresh copied skills after reviewing
+local edits.
 
 The default state layout and setups using `ASYS_STATE_ROOT` retain their existing
 inference configuration and state. Upgrading directly from 0.1.0 also requires

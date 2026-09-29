@@ -146,7 +146,7 @@ class EnvironmentHost(ComponentHost):
             resolved[source] = target
         if human_target is not None:
             resolved['human'] = human_target
-        if resolved.get('human') == '@human_endpoint':
+        if resolved.get('human') == '@human_endpoint' and not getattr(self, 'upgrade_in_progress', False):
             ensure_human(self)
         existing = self.document('view', '--json', self.args.system)
         if existing.get('operation'):
@@ -193,7 +193,12 @@ class EnvironmentHost(ComponentHost):
         start_worlds(self)
         options = self.execution_mounts()
         models = self.directory / 'system-models.json'
-        write_json(models, self.worker_models())
+        if getattr(self, 'upgrade_in_progress', False):
+            # Replacing execution code must not silently change model routing.
+            if not models.is_file():
+                raise LaunchError('Cannot upgrade without the saved system-models.json')
+        else:
+            write_json(models, self.worker_models())
         options += ['--bind', f'{models},/etc/asys/system-models.json,ro']
         bindings = self.directory / 'world-bindings.json'
         if bindings.exists():

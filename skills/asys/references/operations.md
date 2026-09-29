@@ -66,6 +66,58 @@ Read the briefing and artifacts, fill the form and explicitly submit. In plain
 mode, `/details` displays technical context, `/skip` leaves the request pending,
 and `/quit` stops the handler. Closing a terminal never supplies an answer.
 
+## Upgrade a running workflow
+
+Use `--upgrade` after installing execution code that an existing workflow should
+use. Build/install prepares host files and images; `asys update` refreshes shared
+inference and Human services. A workflow upgrade changes only that run's owned
+engine, workers and worlds. It leaves shared inference, shared Human and
+unrelated runs untouched. See [setup](setup.md#update) for build commands.
+
+```sh
+source /path/to/state/asys-env
+asys status RUN
+asys-run --upgrade RUN
+```
+
+Select the run's state directory with its project's `asys-env`, or pass
+`--root DIRECTORY`. The saved workspace, BPMN definition, environment location,
+connections, system/dcomp settings and system-model defaults are retained.
+The environment is rebuilt from that saved location using installed base
+images; an environment without a Dockerfile uses its configured image.
+
+The command takes over monitoring from a launcher supporting upgrade handover,
+then removes the old engine to stop new workflow-task scheduling. Existing
+workers and worlds stay running until every pending/running queue job reaches
+a terminal outcome. Jobs may still need Human answers while draining. Only
+then are the owned workers/worlds replaced and the new engine started to recover
+the checkpoint. Existing job IDs and results are consumed once. A failed job
+keeps its failure and follows the workflow's configured failure handling;
+upgrade does not request the job-replacing resume operation.
+
+The saved checkpoint must be compatible with the replacement engine. Starting
+an upgrade requires the saved environment, model snapshot and complete saved
+component set, plus an engine reporting an active, nonterminal execution.
+An active launcher installed before upgrade handover support is refused before
+any component changes. Installing new host files does not retrofit that running
+process. Restore missing components or resolve checkpoint incompatibility
+before attempting an upgrade; completed/cancelled workflows are history.
+
+A private Human component and its pending requests are retained. Add `--human`
+to attach its terminal during the upgrade and subsequent monitoring. Without
+that flag the private component remains available, but the former launcher's
+terminal detaches. Workflows using shared Human continue using the shared
+terminal (`asys-human-prompt`); `--human` cannot convert them to private Human.
+
+`upgrade.json` in the run directory records progress and selected replacement
+image IDs. If an upgrade fails or is interrupted, inspect its diagnostics and
+repeat `asys-run --upgrade RUN` to continue the recorded operation. Do not use
+`--resume` for a pending upgrade. Ctrl-C during upgrade preserves remaining
+components, running jobs and the checkpoint. A drain can therefore be left
+waiting without cancelling its work. After upgrade completes, the command
+continues ordinary foreground monitoring; Ctrl-C then cancels the workflow and
+cleans up its owned components as usual.
+
 ## Recovery
 
 ```sh
@@ -83,7 +135,8 @@ Resume applies to recoverable workflow state and must not replace a running
 launcher. A workflow loop creates a fresh job per visit. A goal keeps its own
 implementation conversation internally. Completed runs remain history.
 
-Interrupting a run requests cancellation and removal of its owned components.
+Interrupting ordinary foreground execution requests cancellation and removal
+of its owned components.
 If cleanup is incomplete, inspect saved diagnostics and the selected dcomp
 system. Shared inference and unrelated components belong to their own owners.
 
@@ -138,4 +191,4 @@ Startup and reattachment still require their existing readiness checks. Confirme
 component exit, death, disappearance or a reported component problem still fails
 its owning run immediately. During engine recovery these failures retain the
 remaining components; otherwise normal cleanup applies. Explicit interruption
-still cancels work and requests cleanup.
+of ordinary execution still cancels work and requests cleanup.

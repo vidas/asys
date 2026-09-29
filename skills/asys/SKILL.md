@@ -1,6 +1,6 @@
 ---
 name: asys
-description: Run and inspect asys workers and workflows, configure inference and model defaults, answer human requests, and recover failed workflow runs. Use for operating an existing asys project. Use asys-authoring to create environments, workers, worlds, workflows or dashboard designs.
+description: Run and inspect asys workers and workflows, configure inference and model defaults, answer human requests, upgrade running workflows, and recover failed workflow runs. Use for operating an existing asys project. Use asys-authoring to create environments, workers, worlds, workflows or dashboard designs.
 ---
 
 # Operate asys
@@ -42,6 +42,13 @@ scope; inspection does not require starting paid or externally mutating work.
 Read the recorded failure before retrying. `asys-run --resume RUN` restores a
 workflow's saved definition and workspace; partial edits persist. Model output
 is not proof that acceptance criteria passed: inspect artifacts and checks.
+
+After installing new execution code, use `asys-run --upgrade RUN` to drain a
+workflow's jobs and replace its owned engine, workers and worlds. Existing job
+IDs and outcomes are retained, including failures; shared services stay in place.
+Read [workflow upgrades](references/operations.md#upgrade-a-running-workflow)
+before choosing upgrade, retry or shared-service update. Repeat `--upgrade` to
+continue an interrupted upgrade; its jobs and checkpoint are preserved.
 
 Answer human tasks through the Human service. Present the recorded question and
 evidence, obtain the person's answer, and submit it. Do not invent approval to

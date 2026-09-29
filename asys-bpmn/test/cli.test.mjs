@@ -28,6 +28,18 @@ test('resume preserves saved configuration, enforces launcher ownership and skip
   assert.equal(code, 0, error);
 });
 
+test('upgrade drains real jobs and recovers their original outcomes', {timeout: 120000}, async t => {
+  const child = spawn('python3', [fileURLToPath(new URL('./upgrade-cli.py', import.meta.url))], {
+    env: {...process.env, NODE: process.execPath},
+  });
+  t.after(() => child.kill('SIGTERM'));
+  child.stdout.resume();
+  let error = '';
+  child.stderr.on('data', chunk => { error += chunk; });
+  const [code] = await once(child, 'close');
+  assert.equal(code, 0, error);
+});
+
 async function preparedVariables(t, text, stdin = false) {
   const root = await mkdtemp(join(tmpdir(), 'workflow-cli-request-'));
   t.after(() => rm(root, { recursive: true, force: true }));
