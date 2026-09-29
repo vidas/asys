@@ -7,8 +7,27 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import test from 'node:test';
-import {active, describeWorkflowNode, eventDescription, filteredRuns, frameIndex, jsonSummary, kindOf, messageDisplay, messageHeading, messageSections, messageValue, needsAttention, rendererURL, sourceLabel, theme, workflowLayout}
+import {active, describeWorkflowNode, eventDescription, filteredRuns, frameIndex, jsonSummary, kindOf, messageDisplay, messageHeading, messageSections, messageValue, needsAttention, rendererURL, sourceLabel, theme, workflowLayout, worldArtifactReader}
   from '../python/asys/dashboard_assets/dashboard.mjs';
+
+test('world artifact reader preserves its job binding and returns text or integrity errors', async () => {
+  const calls = [], reference = {path:'exports/candidate Ω/board.kicad_pcb',sha256:'a'.repeat(64),size:24};
+  let runId = 'saved run', jobId = 'saved/job';
+  const read = worldArtifactReader(runId,jobId,async url => {
+    calls.push(new URL(url,'http://localhost'));
+    return {ok:true,text:async()=>'(board "Ω")\n'};
+  });
+  runId = 'new run'; jobId = 'new job';
+  assert.equal(await read(reference),'(board "Ω")\n');
+  assert.equal(calls[0].pathname,'/api/runs/saved%20run/jobs/saved%2Fjob/world-artifact');
+  assert.deepEqual(Object.fromEntries(calls[0].searchParams),{...reference,size:'24'});
+  await assert.rejects(read({path:reference.path}),/Expected a world artifact/);
+  assert.equal(calls.length,1);
+  const changed = worldArtifactReader('r','j',async()=>({ok:false,status:400,json:async()=>({error:'World artifact content does not match its reference'})}));
+  await assert.rejects(changed(reference),/content does not match/);
+  const missing = worldArtifactReader('r','j',async()=>({ok:false,status:404,json:async()=>{throw Error('not JSON');}}));
+  await assert.rejects(missing(reference),/World artifact read failed \(404\)/);
+});
 
 test('overview filters preserve named worker identity and distinguish history', () => {
   const rows = [{id:'1',system:'lab',worker_name:'repair',environment:'tools',status:'running',request:'Fix a clock'},
@@ -117,14 +136,14 @@ test('real browser: unified views, isolated execution controls, replay and rende
 },async t=>{
   const root=await mkdtemp(join(tmpdir(),'asys-dashboard-browser-'));
   const assets=fileURLToPath(new URL('../python/asys/dashboard_assets/',import.meta.url));
-  const controls=[];let memberListUnavailable=false,extraSource=false,customDesign=false;
+  const controls=[],artifactReads=[];let memberListUnavailable=false,extraSource=false,customDesign=false;
   const customCSS=':root {--carta:#f3f5f7;--inchiostro:#172435;--verde:#006644;--goal:#008899;--senate:#8844aa;--swarm:#cc7700;--blu:#3355aa;--rosso:#aa3344;--giallo:#aa8800;--font:Georgia,serif;--mono:monospace;--task-shape:"M0 0L1 0L1 1L0 1Z";--gateway-shape:"M.5 0L1 .5L.5 1L0 .5Z"}';
   const sources=[{id:'source-one',path:'swarm/decisions/one/agent.json',title:'agent-001 · turn 0 · agent.json',member:'agent-001',turn:0},{id:'source-two',path:'swarm/decisions/two/agent.json',title:'agent-001 · turn 1 · agent.json',member:'agent-001',turn:1}];
   const structuredMessages=[{id:'u1',role:'user',displayText:'User\n'+JSON.stringify({mission:'Keep a garden alive',observation:{cells:Array.from({length:20},(_,i)=>({x:i,y:0,water:8}))},memory:{plan:'Build'}}),content:JSON.stringify({mission:'Keep a garden alive',observation:{cells:Array.from({length:20},(_,i)=>({x:i,y:0,water:8}))},memory:{plan:'Build'}})},{id:'a1',role:'assistant',displayText:'Tool call: submit_plan\nactions: [{"type":"build","kind":"garden"}]\nmemory: {"plan":"Check water"}',content:[{type:'toolCall',name:'submit_plan',arguments:{actions:[{type:'build',kind:'garden'}],memory:{plan:'Check water'}}}]}];
   const jobs=[['a','agent','assistant'],['g','goal','repair'],['s','senate','review'],['w','swarm','explore'],['p','program','check']]
     .map(([id,kind,type])=>({id,kind,type,name:type,status:'running',elapsed:'2m',metadata:{bpmn:{id:type}}}));
   const run={id:'r',name:'Design investigation',system:'lab',environment:'tools',status:'running',elapsed:'2m',request:'Check <script>unsafe()</script> text',jobs:{active:5,total:5}};
-  const module=`export function mount(element,context) { window.mounts=(window.mounts||0)+1;window.worldTheme=context.theme;
+  const module=`export function mount(element,context) { window.mounts=(window.mounts||0)+1;window.worldTheme=context.theme;window.readSavedWorldArtifact=context.readWorldArtifact;
     element.innerHTML='<p id="fixture-frame"></p><button id="fixture-member">Inspect member</button><button id="fixture-artifact">Inspect artifact</button>';
     element.querySelector('#fixture-member').onclick=()=>context.selectMember('agent-001');
     element.querySelector('#fixture-artifact').onclick=()=>context.inspect({title:'Verified artifact',description:'Measured candidate evidence.',data:{score:8,source:'A long source line\\n'+('payload <script>never()</script> '.repeat(30)),nested:{checked:true}}});
@@ -149,6 +168,10 @@ test('real browser: unified views, isolated execution controls, replay and rende
         res.end(content);return;
       }
       if(path==='/renderer.mjs'){res.setHeader('Content-Type','text/javascript');res.end(module);return;}
+      if(path==='/api/runs/r/jobs/w/world-artifact') {
+        artifactReads.push(Object.fromEntries(new URL(req.url,'http://localhost').searchParams));
+        res.setHeader('Content-Type','text/plain; charset=utf-8');res.end('(board "saved Ω")\n');return;
+      }
       res.setHeader('Content-Type','application/json');
       let payload;
       if(path==='/api/runs')payload={scope:'Fixture systems',runs:[run,{...run,id:'old',name:'Archived check',system:'archive',status:'completed',jobs:{active:0,total:1}}]};
@@ -233,6 +256,8 @@ test('real browser: unified views, isolated execution controls, replay and rende
   assert.equal(await evaluate('document.querySelector("#transcript .message-text").textContent'),'review readable response\nAll recorded details: arbitrary=preserved');
   await evaluate('document.querySelector("[data-job=w]").click()');
   await waitFor('window.lastFrame===4');
+  assert.equal(await evaluate('window.readSavedWorldArtifact({path:"exports/board.kicad_pcb",sha256:"a".repeat(64),size:19})'),'(board "saved Ω")\n');
+  assert.deepEqual(artifactReads,[{path:'exports/board.kicad_pcb',sha256:'a'.repeat(64),size:'19'}]);
   await evaluate('document.querySelector("[data-node=split]").dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true}))');
   assert.match(await evaluate('document.querySelector("#inspector-description").textContent'),/Parallel gateway/);
   await evaluate('document.querySelector("#fixture-artifact").click()');

@@ -1,14 +1,17 @@
 """Exercise nested world observation and the shared dashboard HTTP boundary."""
 import http.client
+import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+from urllib.parse import urlencode
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'python'), str(ROOT / 'asys-runtime')]
-from asys.dashboard import Dashboard, DashboardData, MEMBER_ATTEMPTS, SWARM_ATTEMPTS, TRANSCRIPT_CHARACTERS, saved_messages
+from asys.dashboard import Dashboard, DashboardData, MEMBER_ATTEMPTS, SWARM_ATTEMPTS, TRANSCRIPT_CHARACTERS, WORLD_ARTIFACT_BYTES, saved_messages
 from asys.dashboard_design import Design
 from asys.transcript import render
 from asys.world_history import WorldHistory
@@ -542,6 +545,121 @@ class DashboardTests(unittest.TestCase):
             {'Content-Type': 'application/json', 'Origin': 'https://hostile.example'})[0], 403)
         self.assertEqual(request('POST', base + '/control', '{"action":"pause"}',
             {'Content-Type': 'application/json'})[0], 202)
+
+    def world_artifact(self, contents='(board "saved Ω")\n'.encode()):
+        record = json.loads((self.run / 'run.json').read_text())
+        save(self.run / 'run.json', {**record, 'world_components': {
+            'worlds/original': {'runtime': 'worlds/original-binding'},
+            'worlds/replacement': {'runtime': 'worlds/replacement-binding'}}})
+        save(self.job / 'worker.json', {'kind': 'swarm', 'world_package': 'worlds/original'})
+        runtime = self.run / 'runtime/worlds/original-binding'
+        path = runtime / 'exports/candidate/board.kicad_pcb'
+        path.parent.mkdir(parents=True)
+        path.write_bytes(contents)
+        return runtime, path, {'path': str(path.relative_to(runtime)),
+            'sha256': hashlib.sha256(contents).hexdigest(), 'size': len(contents)}
+
+    def test_world_artifact_uses_job_package_and_survives_component_removal(self):
+        runtime, path, reference = self.world_artifact()
+        replacement = self.run / 'runtime/worlds/replacement-binding' / reference['path']
+        replacement.parent.mkdir(parents=True)
+        replacement.write_text('latest environment content must not replace old evidence')
+        self.assertEqual(self.data.world_artifact('workflow-run', 'child-1', reference), path.read_bytes())
+        # The file reader uses saved bindings, not the original environment or component.
+        record = json.loads((self.run / 'run.json').read_text())
+        record['environment'] = '/removed/environment'
+        save(self.run / 'run.json', record)
+        self.assertEqual(DashboardData(self.root).world_artifact('workflow-run', 'child-1', reference), path.read_bytes())
+        with self.assertRaises(FileNotFoundError):
+            self.data.world_artifact('workflow-run', 'unknown', reference)
+        save(self.job / 'worker.json', {'kind': 'swarm', 'world_package': 'worlds/unrecorded'})
+        with self.assertRaisesRegex(FileNotFoundError, 'recorded world runtime is unavailable'):
+            self.data.world_artifact('workflow-run', 'child-1', reference)
+
+    def test_world_artifact_rejects_invalid_references_and_changed_content(self):
+        runtime, path, reference = self.world_artifact()
+        cases = [None, {}, {**reference, 'package': 'worlds/replacement'}]
+        cases += [{**reference, 'path': value} for value in ['', '.', '../private', '/private',
+            'exports/../private', 'exports//candidate', 'exports/./candidate', 'exports\\private', 'x\0y', 4]]
+        cases += [{**reference, 'size': value} for value in [True, -1, 1.5, '1', WORLD_ARTIFACT_BYTES + 1]]
+        cases += [{**reference, 'sha256': value} for value in ['', 'A' * 64, 'g' * 64, None]]
+        for case in cases:
+            with self.subTest(reference=case), self.assertRaises(ValueError):
+                self.data.world_artifact('workflow-run', 'child-1', case)
+        path.write_bytes(b'x' * reference['size'])
+        with self.assertRaisesRegex(ValueError, 'content does not match'):
+            self.data.world_artifact('workflow-run', 'child-1', reference)
+        path.write_bytes(b'changed length')
+        with self.assertRaisesRegex(ValueError, 'size does not match'):
+            self.data.world_artifact('workflow-run', 'child-1', reference)
+        path.write_bytes(b'\xff')
+        with self.assertRaises(UnicodeDecodeError):
+            self.data.world_artifact('workflow-run', 'child-1',
+                {**reference, 'size': 1, 'sha256': hashlib.sha256(b'\xff').hexdigest()})
+
+    def test_world_artifact_rejects_symlinks_at_every_level_and_nonregular_files(self):
+        runtime, path, reference = self.world_artifact()
+        original = path.with_name('original')
+        path.rename(original)
+        path.symlink_to(original)
+        with self.assertRaises(ValueError):
+            self.data.world_artifact('workflow-run', 'child-1', reference)
+        path.unlink()
+        original.rename(path)
+        candidate = path.parent
+        moved = candidate.with_name('moved')
+        candidate.rename(moved)
+        candidate.symlink_to(moved, target_is_directory=True)
+        with self.assertRaises(ValueError):
+            self.data.world_artifact('workflow-run', 'child-1', reference)
+        candidate.unlink()
+        moved.rename(candidate)
+        moved_runtime = runtime.with_name('moved-runtime')
+        runtime.rename(moved_runtime)
+        runtime.symlink_to(moved_runtime, target_is_directory=True)
+        with self.assertRaises(ValueError):
+            self.data.world_artifact('workflow-run', 'child-1', reference)
+        runtime.unlink()
+        moved_runtime.rename(runtime)
+        path.unlink()
+        os.mkfifo(path)
+        with self.assertRaisesRegex(ValueError, 'regular file'):
+            self.data.world_artifact('workflow-run', 'child-1', reference)
+
+    def test_world_artifact_http_enforces_binding_integrity_and_containment(self):
+        runtime, path, reference = self.world_artifact()
+        contents = path.read_bytes()
+        secret = self.root / 'private'
+        secret.write_bytes(b'outside secret content')
+        (runtime / 'escape').symlink_to(secret)
+        (runtime / 'outside').symlink_to(self.root, target_is_directory=True)
+        server = Dashboard(self.root).start()
+        self.addCleanup(server.close)
+        def get(value, extra=''):
+            connection = http.client.HTTPConnection('127.0.0.1', server.port)
+            connection.request('GET', '/api/runs/workflow-run/jobs/child-1/world-artifact?' + urlencode(value) + extra)
+            response = connection.getresponse()
+            result = response.status, response.getheader('Content-Type'), response.read()
+            connection.close()
+            self.assertNotIn(secret.read_bytes(), result[2])
+            return result
+        self.assertEqual(get(reference), (200, 'text/plain; charset=utf-8', contents))
+        for override in [{'path': '../private'}, {'path': str(secret)}, {'path': 'escape'},
+                         {'path': 'outside/private'}, {'sha256': '0' * 64}, {'size': 0}]:
+            with self.subTest(override=override):
+                self.assertEqual(get({**reference, **override})[0], 400)
+        self.assertEqual(get({**reference, 'path': 'missing'})[0], 404)
+        self.assertEqual(get(reference, '&size=1')[0], 400)
+        self.assertEqual(get({**reference, 'package': 'worlds/replacement'})[0], 400)
+        path.write_bytes(b'x' * reference['size'])
+        self.assertEqual(get(reference)[0], 400)
+        save(self.job / 'worker.json', {'kind': 'swarm'})
+        self.assertEqual(get(reference)[0], 404)
+        save(self.job / 'worker.json', {'kind': 'swarm', 'world_package': 'worlds/original'})
+        record = json.loads((self.run / 'run.json').read_text())
+        record['world_components']['worlds/original']['runtime'] = '../private'
+        save(self.run / 'run.json', record)
+        self.assertEqual(get(reference)[0], 400)
 
     def test_world_jobs_keep_their_own_view_generation_after_environment_refresh(self):
         record = json.loads((self.run / 'run.json').read_text())

@@ -48,6 +48,20 @@ export function rendererURL(value, origin) {
   }
   return url.href;
 }
+export function worldArtifactReader(runId, jobId, request = globalThis.fetch) {
+  const endpoint = `/api/runs/${encodeURIComponent(runId)}/jobs/${encodeURIComponent(jobId)}/world-artifact`;
+  return async reference => {
+    if (!reference || typeof reference.path !== 'string' || typeof reference.sha256 !== 'string'
+        || !Number.isSafeInteger(reference.size)) throw Error('Expected a world artifact path, sha256 and size.');
+    const query = new URLSearchParams({path:reference.path,sha256:reference.sha256,size:String(reference.size)});
+    const response = await request(`${endpoint}?${query}`);
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw Error(detail.error ?? `World artifact read failed (${response.status}).`);
+    }
+    return response.text();
+  };
+}
 export function workflowLayout(nodes, edges) {
   const graph=new Graph({multigraph:true});
   graph.setGraph({rankdir:'LR',nodesep:48,ranksep:64,edgesep:24,marginx:48,marginy:32});
@@ -883,6 +897,7 @@ export function startDashboard(document, window) {
           if (epoch !== state.renderEpoch || generation !== state.generation) return;
           if (typeof module.mount !== 'function') throw Error('Renderer must export mount(element, context).');
           const instance = await module.mount($('#world'), {runId: state.runId, jobId: state.jobId, metadata: payload.metadata ?? {}, theme,
+            readWorldArtifact:worldArtifactReader(state.runId,state.jobId),
             inspect:selection=>{if(epoch===state.renderEpoch)inspect(selection);},selectMember:id=>epoch===state.renderEpoch?selectMember(id):Promise.resolve(null)});
           if (epoch !== state.renderEpoch || generation !== state.generation) { instance?.dispose?.(); return; }
           if (!instance || typeof instance.update !== 'function' || typeof instance.dispose !== 'function') {

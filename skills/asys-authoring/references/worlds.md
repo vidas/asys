@@ -95,6 +95,13 @@ Use `context.inspect(selection)` for the shared sidebar and
 task path are available as `context.theme`. Keep replay observational: rendering
 a frame must not submit actions or mutate execution state.
 
+For larger text artifacts, publish an immutable `{path, sha256, size}` reference
+in the frame and call `await context.readWorldArtifact(reference)` to read its
+UTF-8 contents on demand. `path` is relative to this job's recorded world runtime;
+`sha256` is the lowercase SHA-256 of the raw file bytes and `size` is their count
+(at most 32 MiB). Reads reject traversal, symlinks and changed content. Keep the
+referenced files for replay. The viewer cannot select another world's directory.
+
 The host snapshots view assets with the run and records durable world frames.
 Each job records its renderer generation. Workflow resume can snapshot a new
 renderer for new jobs while earlier jobs keep their saved renderer.

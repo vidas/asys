@@ -2,10 +2,12 @@
 import hashlib
 import json
 import mimetypes
+import os
+import stat
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import threading
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 import xml.etree.ElementTree as ET
 
 from asys_runtime.channel import Writer, direction_root
@@ -24,6 +26,7 @@ MEMBER_ATTEMPTS = 100
 SWARM_ATTEMPTS = 32
 TRANSCRIPT_CHARACTERS = 256 * 1024
 TRANSCRIPT_SOURCES = 512
+WORLD_ARTIFACT_BYTES = 32 * 1024 * 1024
 
 
 def contained(root, relative):
@@ -535,6 +538,63 @@ class DashboardData:
             raise ValueError('World viewer must be a saved JavaScript module')
         return root, entry
 
+    def world_artifact(self, identity, job_id, reference):
+        """Read immutable text evidence from this job's recorded world runtime."""
+        if not isinstance(reference, dict) or set(reference) != {'path', 'sha256', 'size'}:
+            raise ValueError('Expected a world artifact path, sha256 and size')
+        path, digest, size = (reference[key] for key in ('path', 'sha256', 'size'))
+        if (not isinstance(path, str) or not path or len(path) > 4096 or '\\' in path or '\0' in path
+                or any(part in {'', '.', '..'} for part in path.split('/'))):
+            raise ValueError('World artifact path must be a contained relative path')
+        if (not isinstance(digest, str) or len(digest) != 64
+                or any(character not in '0123456789abcdef' for character in digest)):
+            raise ValueError('World artifact sha256 must be a lowercase SHA-256 digest')
+        if type(size) is not int or not 0 <= size <= WORLD_ARTIFACT_BYTES:
+            raise ValueError('World artifact size must be an integer from 0 to 32 MiB')
+        directory, record, job = self.locate_job(identity, job_id)
+        if job['kind'] != 'swarm':
+            raise ValueError('This job does not publish world artifacts')
+        worker = saved_document(Path(job['directory']), 'worker.json')
+        package = worker.get('world_package')
+        binding = record.get('world_components', {}).get(package) if isinstance(package, str) else None
+        if not isinstance(binding, dict):
+            raise FileNotFoundError("This job's recorded world runtime is unavailable")
+        runtime = binding.get('runtime')
+        if (not isinstance(runtime, str) or '\0' in runtime or '\\' in runtime
+                or len(runtime.split('/')) != 2 or runtime.split('/')[0] != 'worlds'
+                or runtime.split('/')[1] in {'', '.', '..'}):
+            raise ValueError('Recorded world runtime must be worlds/<binding-id>')
+        # Walk open directory descriptors so a symlink or concurrent directory
+        # replacement cannot redirect this read outside the recorded runtime.
+        descriptors = []
+        try:
+            flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+            descriptors.append(os.open(directory, flags))
+            parts = ['runtime', *runtime.split('/'), *path.split('/')]
+            for part in parts[:-1]:
+                descriptors.append(os.open(part, flags, dir_fd=descriptors[-1]))
+            descriptor = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                                 dir_fd=descriptors[-1])
+            descriptors.append(descriptor)
+            info = os.fstat(descriptor)
+            if not stat.S_ISREG(info.st_mode):
+                raise ValueError('World artifact must be a regular file')
+            if info.st_size != size:
+                raise ValueError('World artifact size does not match its reference')
+            with os.fdopen(os.dup(descriptor), 'rb') as stream:
+                contents = stream.read(size + 1)
+            if len(contents) != size or hashlib.sha256(contents).hexdigest() != digest:
+                raise ValueError('World artifact content does not match its reference')
+            contents.decode('utf-8')
+            return contents
+        except FileNotFoundError:
+            raise FileNotFoundError('World artifact is unavailable') from None
+        except OSError:
+            raise ValueError('World artifact path must contain only directories and a regular file, without symlinks') from None
+        finally:
+            for descriptor in reversed(descriptors):
+                os.close(descriptor)
+
     def capabilities(self, record, job, worker):
         active = record.get('status') not in TERMINAL and job.get('status') not in JOB_TERMINAL
         state = document(Path(job['directory']) / 'swarm/checkpoint.json') if job['kind'] == 'swarm' else {}
@@ -633,6 +693,14 @@ class Dashboard:
                             return self.respond(200, data.job(identity, job))
                         if parts[5:] == ['world']:
                             return self.respond(200, data.world(identity, job))
+                        if parts[5:] == ['world-artifact']:
+                            query = parse_qs(urlsplit(self.path).query, keep_blank_values=True, strict_parsing=True)
+                            if set(query) != {'path', 'sha256', 'size'} or any(len(value) != 1 for value in query.values()):
+                                raise ValueError('Expected one world artifact path, sha256 and size')
+                            reference = {key: value[0] for key, value in query.items()}
+                            reference['size'] = int(reference['size'])
+                            contents = data.world_artifact(identity, job, reference)
+                            return self.respond(200, contents, 'text/plain; charset=utf-8')
                         if parts[5:] == ['members']:
                             return self.respond(200, data.members(identity, job))
                         if len(parts) == 7 and parts[5] == 'members':
