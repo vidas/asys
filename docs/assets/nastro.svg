@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 260" role="img" aria-label="A run record: a numbered strip of events in sequence. Ten events are saved, the next four are not yet written. A green step below the strip marks where a reader has reached.">
+  <rect width="1200" height="260" fill="#EFE7D6"/>
+  <text x="56" y="52" font-family="'Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11.5" font-weight="700" letter-spacing="2.5" fill="#201A12">RUN RECORD · runs/RUN</text>
+  <rect x="56" y="112" width="1144" height="44" fill="#E4DCCA"/>
+  <line x1="56" y1="156" x2="1200" y2="156" stroke="#201A12" stroke-width="3" stroke-linecap="square"/>
+  <g font-family="ui-monospace,'SFMono-Regular',Consolas,monospace" font-size="12" fill="#6E675C" text-anchor="middle">
+    <text x="92" y="100">01</text><text x="148" y="100">02</text><text x="204" y="100">03</text><text x="260" y="100">04</text>
+    <text x="316" y="100">05</text><text x="372" y="100">06</text><text x="428" y="100">07</text><text x="484" y="100">08</text>
+    <text x="540" y="100">09</text><text x="596" y="100">10</text><text x="652" y="100">11</text><text x="708" y="100">12</text>
+    <text x="764" y="100">13</text><text x="820" y="100">14</text>
+  </g>
+  <g fill="#201A12">
+    <polygon points="80,146 104,146 92,125.2"/><polygon points="136,146 160,146 148,125.2"/>
+    <polygon points="192,146 216,146 204,125.2"/><polygon points="248,146 272,146 260,125.2"/>
+    <polygon points="304,146 328,146 316,125.2"/><polygon points="360,146 384,146 372,125.2"/>
+    <polygon points="416,146 440,146 428,125.2"/><polygon points="472,146 496,146 484,125.2"/>
+    <polygon points="528,146 552,146 540,125.2"/><polygon points="584,146 608,146 596,125.2"/>
+  </g>
+  <g fill="none" stroke="#928B7E" stroke-width="2.5" stroke-linejoin="miter">
+    <polygon points="641,145 663,145 652,126"/><polygon points="697,145 719,145 708,126"/>
+    <polygon points="753,145 775,145 764,126"/><polygon points="809,145 831,145 820,126"/>
+  </g>
+  <polygon points="578,204 614,204 596,172.8" fill="#3E7C5A"/>
+  <text x="630" y="200" font-family="'Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11.5" font-weight="700" letter-spacing="2.5" fill="#201A12">RESUME · UPGRADE · INSPECT</text>
+</svg>
