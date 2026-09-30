@@ -209,6 +209,27 @@ class Upgrade(unittest.TestCase):
         self.assertNotIn('resume', self.host.requests)
         self.assertFalse((queue.directory('original-job') / 'cancel.json').exists())
 
+    def test_coordinated_update_holds_drained_components_until_services_are_replaced(self):
+        self.job('done')
+        maintenance = {'version': 1, 'id': 'update-1', 'build': 'new-build', 'phase': 'draining',
+                       'runs': {'saved-run': 'upgrade'}}
+        write_json(self.root / 'maintenance.json', maintenance)
+        def at_barrier(_):
+            journal = read_json(self.directory / 'upgrade.json')
+            self.assertEqual((journal['phase'], journal['maintenance'], journal['awaitingMaintenance']),
+                             ('replacing', 'update-1', 'update-1'))
+            # Drained on the old services: the engine is gone, workers wait unchanged.
+            self.assertEqual(self.removed(), ['engine'])
+            self.assertEqual(self.host.builds, 0)
+            write_json(self.root / 'maintenance.json', {**maintenance, 'phase': 'ready'})
+        with patch.object(self.host.interrupted, 'wait', side_effect=at_barrier) as wait:
+            prepare_upgrade(self.host)
+        self.assertEqual(wait.call_count, 1)
+        self.assertEqual(self.host.builds, 1)
+        self.assertEqual(self.removed(), ['engine', 'world', 'worker'])
+        self.assertEqual(read_json(self.directory / 'upgrade.json')['phase'], 'recovering')
+        self.assertIn('Drained; waiting for asys update to install new-build services', self.host.notices)
+
     def test_interrupt_during_drain_preserves_workers_and_retry_continues(self):
         queue = self.job()
         with patch.object(self.host.interrupted, 'wait', side_effect=lambda _: self.host.interrupted.set()):

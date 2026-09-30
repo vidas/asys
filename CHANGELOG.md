@@ -14,6 +14,12 @@
 - Add `asys version` to show the installed release, the selected state, and the
   build each running shared service uses, with warnings for outdated services
   and for another `asys-inference` earlier on PATH.
+- Coordinate `asys update` with active runs when the inference format changes.
+  Affected workflows drain on the current services through a background
+  `asys-run --upgrade`, then continue on the new release once the services are
+  replaced; single-worker runs finish first. An interrupted update continues
+  when repeated. Workflows that predate upgrade handover stop the update unless
+  `--force` is given.
 - Split building from installing: `make` builds, `make install` only copies, so
   `sudo make install` no longer leaves root-owned files in the checkout.
   Docker Engine 23+ with BuildKit is required.

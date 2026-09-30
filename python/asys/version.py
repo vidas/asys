@@ -2,10 +2,10 @@
 import json
 from pathlib import Path
 import shutil
-import subprocess
 
 from asys_runtime import release
 
+from . import maintenance
 from .update import inference_command
 
 
@@ -38,6 +38,11 @@ def version(args):
                 + human_services(Path(args.root), installed, warnings, width))
     for line in services or ['  none running in this state']:
         print(line)
+
+    pending = maintenance.load(args.root)
+    if pending and pending.get('phase') != 'complete':
+        warnings.append(f"the update to {pending['build']} is unfinished ({pending['phase']}); "
+                        'drained runs wait until asys update is repeated')
 
     command = shutil.which('asys-inference')
     expected = Path(inference_command()).resolve()
@@ -85,7 +90,7 @@ def human_services(root, installed, warnings, width):
 
 
 def image_build(image):
-    result = subprocess.run(['docker', 'image', 'inspect', '--format', '{{index .Config.Labels "io.asys.build"}}', image],
-                            capture_output=True, text=True)
-    label = result.stdout.strip() if result.returncode == 0 else ''
-    return '' if label in ('', '<no value>') else label
+    try:
+        return release.image_labels(image).get(release.BUILD_LABEL, '')
+    except release.ReleaseError:
+        return ''

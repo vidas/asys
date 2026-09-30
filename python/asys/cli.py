@@ -81,8 +81,10 @@ def arguments(argv):
                       help='initialize or reuse this dcomp state directory (default: <asys directory>/dcomp)')
     init.add_argument('--group', metavar='GROUP', help='share new state with this Unix group')
 
-    add_command(commands, 'update', update,
-                'Refresh running shared services from the installed images', parents=[state])
+    refresh = add_command(commands, 'update', update,
+                          'Refresh running shared services from the installed images', parents=[state])
+    refresh.add_argument('--force', action='store_true',
+                         help='update even if active workflows predating upgrade handover would lose inference')
 
     add_command(commands, 'version', version,
                 'Show the installed release and the release each running service uses', parents=[state])

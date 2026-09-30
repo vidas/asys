@@ -11,6 +11,7 @@ import os
 from asys_runtime import release
 from asys_runtime.channel import Reader, Writer, direction_root
 from asys_runtime.permissions import open_file
+from . import maintenance
 from .human_service import SharedHumanService, human_image
 
 
@@ -52,12 +53,23 @@ def update(args):
     machine = root / 'inference/machine.json'
     config = json.loads(machine.read_text())['config'] if machine.is_file() else {}
     if config.get('running'):
+        # Runs whose workers cannot use the new inference drain on the current
+        # services first, then continue on the replaced ones.
+        try:
+            installed = release.load()
+        except release.ReleaseError as error:
+            raise ValueError(f'Cannot compare running work with the installation: {error}') from error
+        work = maintenance.plan(root, installed, force=getattr(args, 'force', False))
+        if work:
+            maintenance.drain(root, work, maintenance.spawner(root))
         print('Updating inference services…', flush=True)
         subprocess.run([inference_command(), '--root', str(root), 'start'], check=True)
-        args = Namespace(system=config['system'],
-                         dcomp_state_root=Path(config['dcomp_state_root']),
-                         runtime_root=Path(config['runtime_root']) if config.get('runtime_root') else None)
-        SharedHumanService(args, root / 'human').ensure()
+        service = Namespace(system=config['system'],
+                            dcomp_state_root=Path(config['dcomp_state_root']),
+                            runtime_root=Path(config['runtime_root']) if config.get('runtime_root') else None)
+        SharedHumanService(service, root / 'human').ensure()
+        if work:
+            maintenance.release_runs(root, work)
         changed = True
     for path in sorted((root / 'human').glob('*/service.json')):
         record = json.loads(path.read_text())

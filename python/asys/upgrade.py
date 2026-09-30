@@ -32,7 +32,7 @@ class UpgradeHandover(Exception):
     """The current monitor yielded its lease without cancelling execution."""
 
 
-def _journal(directory):
+def read_journal(directory):
     path = Path(directory) / 'upgrade.json'
     if not path.exists():
         return None
@@ -45,7 +45,7 @@ def _journal(directory):
 
 
 def pending_upgrade(directory):
-    value = _journal(directory)
+    value = read_journal(directory)
     if value is None or value['phase'] == 'complete':
         return False
     if value['phase'] != 'requested' or value.get('handedOverAt'):
@@ -70,7 +70,7 @@ def handover_if_requested(host):
     """Called by the owning monitor; an absent requester never causes a detach."""
     if getattr(host, 'upgrade_in_progress', False):
         return
-    journal = _journal(host.directory)
+    journal = read_journal(host.directory)
     if not journal or journal['phase'] != 'requested':
         return
     requester = acquire_lock(host.directory / 'upgrade.lock')
@@ -204,6 +204,33 @@ def _prepare(host, journal):
     _save(host, journal, 'prepared', targetImages=targets)
 
 
+def _maintenance(host):
+    """The coordinated update this upgrade belongs to, if one lists the run."""
+    from .maintenance import load
+    maintenance = load(state_root(root=host.args.root))
+    if maintenance and maintenance.get('phase') == 'draining' and host.id in maintenance['runs']:
+        return {'maintenance': maintenance['id']}
+    return {}
+
+
+def _await_services(host, journal):
+    """Hold drained components until asys update has replaced shared services."""
+    from .maintenance import load
+    announced = False
+    while True:
+        maintenance = load(state_root(root=host.args.root))
+        if (not maintenance or maintenance['id'] != journal.get('maintenance')
+                or maintenance['phase'] != 'draining'):
+            return
+        if journal.get('awaitingMaintenance') != maintenance['id']:
+            _save(host, journal, awaitingMaintenance=maintenance['id'])
+        if not announced:
+            host.say(f'Drained; waiting for asys update to install {maintenance["build"]} services')
+            announced = True
+        host.interrupted.wait(POLL_SECONDS)
+        host.check_interrupt()
+
+
 def _attach_human(host):
     if not getattr(host.args, 'human', False) or host.human:
         return
@@ -265,7 +292,7 @@ def finish_upgrade(host):
     if not getattr(host, 'upgrade_in_progress', False):
         return
     host.check_interrupt()
-    journal = _journal(host.directory)
+    journal = read_journal(host.directory)
     if not journal or journal['phase'] != 'recovering':
         raise LaunchError('Upgrade has not reached workflow recovery')
     if journal.get('outcome') == 'finished during handover':
@@ -287,7 +314,7 @@ def prepare_upgrade(host):
         raise LaunchError('This run already has an upgrade command')
     journal = None
     try:
-        journal = _journal(directory)
+        journal = read_journal(directory)
         if journal and journal['phase'] == 'complete':
             journal = None
         if not journal or journal['phase'] == 'requested':
@@ -311,7 +338,7 @@ def prepare_upgrade(host):
                 raise LaunchError('Another launcher owns this interrupted upgrade')
             if journal is None:
                 journal = {'version': PROTOCOL, 'id': uuid.uuid4().hex, 'runId': host.id,
-                           'phase': 'requested', 'requestedAt': timestamp()}
+                           'phase': 'requested', 'requestedAt': timestamp(), **_maintenance(host)}
                 _save(host, journal)
             deadline = time.monotonic() + getattr(host, 'UPGRADE_HANDOVER_TIMEOUT', HANDOVER_TIMEOUT)
             while host.lease is None:
@@ -320,7 +347,7 @@ def prepare_upgrade(host):
                     raise LaunchError('The active launcher did not hand over; no components were changed')
                 host.interrupted.wait(POLL_SECONDS)
                 host.lease = _lease(directory)
-            journal = _journal(directory)
+            journal = read_journal(directory)
         _record(host, directory)  # The previous owner may have published a result.
         if journal and journal['phase'] == 'requested' and host.record.get('status') in {'completed', 'cancelled'}:
             _save(host, journal, 'complete', completedAt=timestamp(), outcome='finished before handover')
@@ -351,7 +378,7 @@ def prepare_upgrade(host):
                 raise LaunchError('Workflow engine has no active execution; recover it before upgrading')
             engine_image = host.engine_image()
             journal = journal or {'version': PROTOCOL, 'id': uuid.uuid4().hex, 'runId': host.id,
-                                  'requestedAt': timestamp()}
+                                  'requestedAt': timestamp(), **_maintenance(host)}
             _save(host, journal, 'owned', originalStatus=host.record.get('status'), engineImage=engine_image,
                   originalComponents={name: _identity(components[name]) for name in host.names.values()})
         host.upgrade_in_progress = True
@@ -371,6 +398,7 @@ def prepare_upgrade(host):
             _drain(host, journal)
             _save(host, journal, 'replacing')
         if journal['phase'] == 'replacing':
+            _await_services(host, journal)
             private_human = host.names.get('human')
             names = [name for name in journal['originalComponents'] if name != private_human]
             _remove(host, [host.names['engine'], *reversed([name for name in names if name != host.names['engine']])], journal['originalComponents'])

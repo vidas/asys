@@ -76,10 +76,25 @@ unrelated runs untouched. See [setup](setup.md#update) for build commands.
 
 `asys update` keeps inference logins: the gateway's credentials volume belongs
 to the state, not the image. A release that changes the pinned Pi version also
-changes the inference format.
-After `asys update`, shared inference advertises only the new format, and new
-agent jobs of active runs fail with no usable model until those runs are
-upgraded.
+changes the inference format, which workers of active runs cannot use.
+`asys update` coordinates that change itself. It compares the format each active
+run's workers speak with the installed release, then, before replacing any
+service:
+
+- starts a background `asys-run --upgrade` for each affected workflow, which
+  takes over monitoring, drains the running jobs on the current services and
+  waits; the terminal that was monitoring it returns after the handover
+- waits for each affected single-worker run to finish
+
+It then replaces the services and lets the drained workflows continue on the new
+release, monitored in the background: follow them with `asys top` or
+`asys logs -f RUN`. Draining lasts as long as the longest running job. If
+interrupted, repeat `asys update` to continue; drained workflows wait until it
+completes, and `asys version` reports the unfinished update. Workflows started
+before upgrade handover support cannot be drained, so `asys update` lists them
+and stops; `asys update --force` replaces the services anyway and those runs
+lose inference. A compatible update replaces services immediately and leaves
+runs untouched.
 
 ```sh
 source /path/to/state/asys-env

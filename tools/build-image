@@ -3,10 +3,12 @@
 
 Usage: build-image NAME CONTEXT [DOCKERFILE]
 
-The image is tagged NAME:$ASYS_BUILD and labelled with the version and build.
-Dockerfiles name their asys base images bare (FROM asys-runtime); those names
-resolve to the images this build already recorded.
+The image is tagged NAME:$ASYS_BUILD and labelled with the version, build and
+inference format it speaks. Dockerfiles name their asys base images bare
+(FROM asys-runtime); those names resolve to the images this build already
+recorded. Images built FROM them inherit the labels.
 """
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -16,20 +18,24 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "asys-runtime"))
 from asys_runtime import release  # noqa: E402
 
+ABI = ROOT / "asys-inference/components/protocol/provider/src/abi.json"
+
 
 def main(name, context, dockerfile=None):
     build = os.environ["ASYS_BUILD"]
     version = (ROOT / "VERSION").read_text().strip()
+    inference = json.loads(ABI.read_text())["piInferenceFormat"]
     path = ROOT / release.RELEASE_FILE
     ref = f"{name}:{build}"
     contexts = release.build_contexts(release.load(path)) if path.is_file() else []
     command = ["docker", "build", "--tag", ref,
                "--label", f"org.opencontainers.image.version={version}",
-               "--label", f"io.asys.build={build}", *contexts]
+               "--label", f"{release.BUILD_LABEL}={build}",
+               "--label", f"{release.INFERENCE_LABEL}={inference}", *contexts]
     if dockerfile:
         command += ["--file", dockerfile]
     subprocess.run([*command, context], check=True)
-    release.record(path, name, ref, version=version, build=build)
+    release.record(path, name, ref, version=version, build=build, interfaces={"inference": inference})
 
 
 if __name__ == "__main__":

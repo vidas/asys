@@ -7,6 +7,7 @@ images from it, never from a mutable tag, so building another checkout does
 not change what an installation runs.
 """
 
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -19,6 +20,9 @@ BASES = ("asys-runtime", "asys-workers", "asys-worlds")
 # Spelling used before release identity; still resolved so existing
 # environments build unchanged.
 LEGACY_TAG = "dev"
+# Image labels; images built FROM an asys base inherit them.
+BUILD_LABEL = "io.asys.build"
+INFERENCE_LABEL = "io.asys.inference-format"
 
 
 class ReleaseError(RuntimeError):
@@ -89,14 +93,20 @@ def legacy_bases(dockerfile):
     return names
 
 
-def record(path, name, ref, *, version, build):
-    """Add NAME's freshly tagged image to the release at PATH."""
+def record(path, name, ref, *, version, build, interfaces=None):
+    """Add NAME's freshly tagged image to the release at PATH.
+
+    INTERFACES names the protocol versions this build speaks, such as the
+    inference format; an update compares them with what running work uses.
+    """
     path = Path(path)
     try:
         release = load(path)
     except FileNotFoundError:
         release = {"images": {}}
     release.update(version=version, build=build)
+    if interfaces is not None:
+        release["interfaces"] = interfaces
     release["images"][name] = {"ref": ref, "id": inspect_image(ref), "build": build}
     write_json(path, release, mode=0o644)
     return release
@@ -108,3 +118,12 @@ def inspect_image(ref):
     if result.returncode:
         raise ReleaseError(f"Image {ref} is unavailable: {result.stderr.strip()}")
     return result.stdout.strip()
+
+
+def image_labels(image):
+    """Return an image's labels; images built before release identity have none."""
+    result = subprocess.run(["docker", "image", "inspect", "--format", "{{json .Config.Labels}}", image],
+                            capture_output=True, text=True)
+    if result.returncode:
+        raise ReleaseError(f"Image {image} is unavailable: {result.stderr.strip()}")
+    return json.loads(result.stdout) or {}

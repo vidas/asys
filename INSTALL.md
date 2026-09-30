@@ -168,7 +168,7 @@ images. Choose the action for the components being updated:
 | `make` | Build host commands and execution images under a new build ID |
 | `make install` | Install what `make` built: core, inference and Human host tools and the release record |
 | `make install-host` | Install core host files, skills and the release record, without inference/Human host tools |
-| `asys update` | Refresh shared inference and Human services from installed code/images |
+| `asys update` | Refresh shared inference and Human services; first drain and then upgrade active runs they would break |
 | `asys-run --upgrade RUN` | Drain and replace one workflow's owned execution components |
 
 For workflow/runtime changes with unchanged shared services, build the BPMN
