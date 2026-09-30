@@ -163,6 +163,22 @@ It leaves shared services untouched; `asys update` is a separate operation that
 can replace those services. See [workflow upgrades](skills/asys/references/operations.md#upgrade-a-running-workflow)
 for compatibility, launcher handover and interruption behavior.
 
+## Upgrade to 0.2.1
+
+Install dcomp 0.3.2 or newer first. Finish active runs: 0.2.0 launchers predate
+upgrade handover, and after the Pi update their workers find no compatible
+models. Then install with the original prefix and update each state:
+
+```sh
+make install
+source /path/to/state/asys-env
+asys update
+asys-inference models
+```
+
+Logins are kept. Runs started under 0.2.1 can later move to new execution code
+with `asys-run --upgrade RUN`.
+
 ## Upgrade to 0.2.0
 
 Finish active work before replacing services or changing definition formats.

@@ -1,6 +1,6 @@
 {
   "name": "@asys/bpmn",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "description": "Run BPMN workflows with agents and human tasks in a reusable dcomp component",

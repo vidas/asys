@@ -1,16 +1,32 @@
 # Release notes
 
-## Unreleased
+## 0.2.1
 
+- Update Pi to 0.99.1 for current models and providers, including GPT-6.
+  Provider payloads now carry Pi's normalized transcript, and the inference
+  format becomes `pi-ai@0.99.1`: update shared inference and upgrade active runs
+  together. Logins survive `asys update`, and a stored-credentials test keeps
+  earlier Pi records readable.
+- Add `asys-run --upgrade RUN` to drain a workflow's jobs and move it onto
+  installed execution code, preserving job IDs, outcomes and saved connections.
+  An interrupted upgrade continues by repeating the command.
+- Recover runtime failures without discarding active work: retry transient
+  catalogue failures, keep durable writes off the workflow event loop, allow a
+  bounded engine restart, and reattach private Human handlers. Keep active runs
+  alive through shared status timeouts.
+- Preserve context-overflow errors so agents compact and resume instead of
+  retrying, and report recent gateway failures in `asys-inference status`.
+  Recheck exhausted providers within ten minutes.
+- Assess goals from current evidence and preserve their review history. Make
+  Senate contributions substantive public speeches with preserved dissent.
+- Fit workflow diagrams in a zoomable dashboard panel, keep activity and kind
+  filters across refresh, and let world renderers cite immutable artifacts.
 - Default `asys init DIRECTORY` to `DIRECTORY/dcomp` and initialize it with the
   requested shared group. Only an explicit `--dcomp` selects another directory;
   the caller's existing environment and home directory no longer select it.
 - Require dcomp 0.3.2 or newer for its disconnected pending-connection fix.
   Pin the inference Go dependency to v0.3.2 and remove the copied Go source
   override so builds use the published module.
-- Update Pi to 0.99.1 for current models and providers. Provider payloads now
-  carry Pi's normalized transcript, and the inference format becomes
-  `pi-ai@0.99.1`: update shared inference and upgrade active runs together.
 
 ## 0.2.0
 
