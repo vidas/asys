@@ -106,8 +106,9 @@ checkpoints in the state directory, written so that a crash leaves a record you
 can continue from:
 
 ```sh
+asys status                 # is the setup running: services and active runs
 asys top                    # live runs, jobs and transcripts
-asys status latest          # jobs, results and errors
+asys status latest          # one run's jobs, results and errors
 asys logs latest            # saved output, or one job's worker output
 asys dashboard              # workflow maps, transcripts, Senates and swarm worlds
 asys-run --resume RUN       # restart the failed stage of a workflow

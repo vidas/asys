@@ -7,6 +7,7 @@ import sys
 from .config import list_system_models, set_system_model
 from .lifecycle import LaunchError
 from .monitor import top
+from .overview import overview
 from .runs import logs, status
 from .skill import skill
 from .state import initialize, state_root
@@ -18,6 +19,10 @@ from .options import ROOT_HELP
 def dashboard(args):
     from .dashboard import dashboard as serve
     return serve(args)
+
+
+def system_or_run_status(args):
+    return status(args) if args.run else overview(args)
 
 
 def validate_dashboard(parser, args):
@@ -113,9 +118,12 @@ def arguments(argv):
     ps.add_argument('--json', action='store_true', help='print structured run and job status')
 
     run_help = 'run ID or unique prefix, latest, or a saved run directory'
-    inspect = add_command(commands, 'status', status, "Show a run's jobs and errors", parents=[state])
-    inspect.add_argument('run', nargs='?', metavar='RUN', help=run_help)
-    inspect.add_argument('--json', action='store_true', help='print structured run and job status')
+    inspect = add_command(commands, 'status', system_or_run_status,
+                          "Show whether the system and its services are running, or one run's jobs and errors",
+                          parents=[state])
+    inspect.add_argument('run', nargs='?', metavar='RUN',
+                         help=run_help + '; omit it to show the system, its services and active runs')
+    inspect.add_argument('--json', action='store_true', help='print structured status')
 
     output = add_command(commands, 'logs', logs, 'Show saved run output; JOB selects worker output',
                          parents=[state], validate=validate_logs)

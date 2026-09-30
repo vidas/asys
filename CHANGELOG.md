@@ -11,6 +11,9 @@
 - Name asys base images without a tag (`FROM asys-workers`); asys resolves them
   to the installed release. Existing `FROM asys-workers:dev` environments build
   unchanged and print a notice to update the line.
+- `asys status` without a run reports the setup: its dcomp system, the shared
+  services with their state, health and build, and each active run with its
+  components. `asys ps` lists runs; `asys status RUN` shows one.
 - Add `asys version` to show the installed release, the selected state, and the
   build each running shared service uses, with warnings for outdated services
   and for another `asys-inference` earlier on PATH.

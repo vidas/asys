@@ -64,6 +64,10 @@ asys dashboard [--port PORT] [--design DIRECTORY] [--root DIRECTORY]
 asys skill [DEST] [--name asys|asys-authoring]
 ```
 
+`asys status` without `RUN` reports the setup: its dcomp system, the shared
+services with their state, health and build, and each active run with its
+components. With `RUN` it shows that run's jobs and errors.
+
 `RUN` accepts an ID, unique prefix, `latest`, or saved run directory. `JOB`
 accepts a name, ID or unique prefix. An omitted run selects the latest applicable
 run; `ps` lists saved runs.

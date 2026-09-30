@@ -1,6 +1,7 @@
 # Monitor runs and inspect evidence
 
 ```sh
+asys status            # is the setup running: system, services, active runs
 asys ps
 asys status RUN
 asys logs RUN

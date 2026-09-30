@@ -1,4 +1,5 @@
 import contextlib
+import fcntl
 import io
 import json
 import os
@@ -8,12 +9,15 @@ import shutil
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'python'), str(ROOT / 'asys-runtime'), str(ROOT / 'test-support')]
+from asys import overview as overview_module
 from asys import version as version_module
 from asys.cli import arguments
+from asys_runtime.files import write_json
 from release_fixture import use_fixture_release
 
 
@@ -139,6 +143,62 @@ class VersionTests(unittest.TestCase):
         self.assertRegex(text, r'asys-human\s+fixture\s+current')
         self.assertIn('warning: asys-inference-gateway was not built by release fixture; run asys update', text)
         self.assertNotIn('warning: asys-human', text)
+
+
+class SystemStatusTests(unittest.TestCase):
+    def setUp(self):
+        self.state = Path(tempfile.mkdtemp(prefix='asys-overview-'))
+        self.addCleanup(shutil.rmtree, self.state)
+        use_fixture_release(self, self.state, 'sha256:current')
+
+    def dcomp(self, reports):
+        """Fake `dcomp status --json` per state root; it exits 1 when not operational."""
+        def run(command, **kwargs):
+            report = reports.get(command[command.index('--state-root') + 1])
+            return SimpleNamespace(returncode=0 if report and report.get('operational') else 1,
+                                   stdout=json.dumps(report) if report else '', stderr='')
+        return patch.object(overview_module.subprocess, 'run', side_effect=run)
+
+    def test_status_without_a_run_reports_the_system_services_and_active_runs(self):
+        (self.state / 'inference').mkdir()
+        write_json(self.state / 'inference/machine.json', {'revision': 1, 'applied_revision': 1, 'config': {
+            'system': 'asys', 'dcomp_state_root': '/shared/dcomp'}, 'applied': {'components': [
+                {'name': 'asys-inference-gateway', 'component': {'image': 'sha256:current'}}]}})
+        run = self.state / 'runs/abc123'
+        run.mkdir(parents=True)
+        write_json(run / 'run.json', {'id': 'abc123', 'name': 'Review', 'status': 'running', 'system': 'private',
+                                      'dcomp': ['dcomp', '--state-root', '/run/dcomp'],
+                                      'components': {'engine': 'review-engine', 'workers': 'review-workers'}})
+        lease = (run / 'launcher.lock').open('a+b')
+        self.addCleanup(lease.close)
+        fcntl.flock(lease, fcntl.LOCK_EX)
+        component = lambda name, health='healthy': {'name': name, 'status': 'running', 'health': health}
+        reports = {
+            '/shared/dcomp': {'desired': True, 'operational': False, 'operation': '', 'proxy': {'ready': True},
+                              'components': [component('asys-inference-gateway'), component('stray')]},
+            '/run/dcomp': {'desired': True, 'operational': True, 'operation': '', 'proxy': {'ready': True},
+                           'components': [component('review-engine'), component('review-workers', 'unhealthy')]},
+        }
+        output = io.StringIO()
+        with self.dcomp(reports), patch.object(overview_module, 'image_build', return_value='fixture'), \
+                contextlib.redirect_stdout(output):
+            args = arguments(['status', '--root', str(self.state)])
+            args.handler(args)
+        text = output.getvalue()
+        self.assertIn('system    asys · dcomp /shared/dcomp · degraded', text)
+        self.assertRegex(text, r'inference\s+asys-inference-gateway\s+running\s+healthy\s+current')
+        self.assertIn('1 active of 1 saved', text)
+        # Run components come from the run's own dcomp state and system.
+        self.assertRegex(text, r'review-engine\s+running\s+healthy')
+        self.assertIn('warning: run abc123 component review-workers is running/unhealthy', text)
+        self.assertRegex(text, r'other components\n\s+stray\s+running\s+healthy')
+
+    def test_a_run_argument_still_shows_that_run(self):
+        args = arguments(['status', 'latest', '--root', str(self.state)])
+        with patch('asys.cli.status') as run_status, patch('asys.cli.overview') as system:
+            args.handler(args)
+        run_status.assert_called_once_with(args)
+        system.assert_not_called()
 
 
 if __name__ == '__main__':
