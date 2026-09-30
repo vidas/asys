@@ -16,14 +16,14 @@ the fix requires replacing the running proxy; `asys update` alone leaves it runn
 ```sh
 dcomp version
 command -v dcomp-proxy
-make
-make install
+make install                      # or: sudo make install PREFIX=/usr/local
 ```
 
-Run make from this repository as your own user: `make` builds the commands and
-images, and `make install` only copies what was built, so a system prefix is
-`make` followed by `sudo make install PREFIX=/usr/local` and root never writes
-into the checkout. The default prefix is `~/.local`; add its bin to PATH.
+Run make from this repository. `make install` builds the commands and images,
+then installs them. Under sudo the build runs as your own user and only the
+copying runs as root, so root never writes into the checkout. Rebuilding an
+unchanged tree reuses its build and Docker's cache, so a separate `make` first
+costs nothing extra. The default prefix is `~/.local`; add its bin to PATH.
 `DESTDIR` stages host files. Installation does not initialize state or
 authenticate an inference account.
 
@@ -67,7 +67,8 @@ earlier on PATH. A release changes `VERSION` and
 world resources, default dashboard design, both skills and the release record,
 without inference or the Human terminal. Component targets remain available:
 `make -C asys-inference install` and `make -C asys-human-interface install`.
-Every install target copies the result of an earlier `make`.
+Those targets copy the result of an earlier `make`; only the root `make install`
+builds first.
 
 Bundled guides are installed under `PREFIX/share/asys/skills/{asys,asys-authoring}`.
 The default visual package is `PREFIX/share/asys/designs/default`.
@@ -167,7 +168,7 @@ images. Choose the action for the components being updated:
 | Action | Effect |
 | --- | --- |
 | `make` | Build host commands and execution images under a new build ID |
-| `make install` | Install what `make` built: core, inference and Human host tools and the release record |
+| `make install` | Build, then install core, inference and Human host tools and the release record |
 | `make install-host` | Install core host files, skills and the release record, without inference/Human host tools |
 | `asys update` | Refresh shared inference and Human services; first drain and then upgrade active runs they would break |
 | `asys-run --upgrade RUN` | Drain and replace one workflow's owned execution components |
@@ -194,11 +195,9 @@ for compatibility, launcher handover and interruption behavior.
 Install dcomp 0.3.2 or newer first. Finish active runs: 0.2.0 launchers predate
 upgrade handover, and after the Pi update their workers find no compatible
 models. `asys update` lists such workflows and stops; `--force` updates anyway
-and they fail. Then build as your own user, install with the original prefix and
-update each state:
+and they fail. Then install with the original prefix and update each state:
 
 ```sh
-make
 make install                      # or: sudo make install PREFIX=/usr/local
 source /path/to/state/asys-env
 asys update

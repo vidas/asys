@@ -63,7 +63,6 @@ Senate, and a person who accepts, revises or stops.
 check that execution works with the bundled workflow. It needs no model account:
 
 ```sh
-make
 make install
 asys init ./state
 source ./state/asys-env
@@ -122,7 +121,6 @@ Each build is tagged with its version and commit, and an installation runs only
 the images it installed:
 
 ```sh
-make
 make install                # or: sudo make install PREFIX=/usr/local
 asys update                 # refresh shared services in the selected state
 asys version                # what is installed, and what each service runs
@@ -139,7 +137,6 @@ A team can share one installation, one inference gateway with its signed-in
 accounts, and one set of run records through a Unix group:
 
 ```sh
-make
 sudo make install PREFIX=/usr/local
 sudo groupadd --force asys && sudo usermod -aG asys alice
 sudo install -d -g asys -m 2770 /srv/asys

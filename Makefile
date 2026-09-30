@@ -74,9 +74,14 @@ build: host
 	$(MAKE) -C asys-bpmn build
 	$(MAKE) -C asys-human-interface build
 
-# Installation copies what make built, so sudo never writes into the checkout.
+# Installation builds first. Under sudo the build runs as the invoking user, so
+# root never writes into the checkout; only the copying below runs as root.
+ifeq ($(shell id -u),0)
+BUILD_USER := $(if $(SUDO_USER),sudo -u $(SUDO_USER) -H)
+endif
+
 install:
-	@test -f release.json || { echo "Nothing is built; run make first, then make install." >&2; exit 1; }
+	$(BUILD_USER) $(MAKE) build ASYS_BUILD=$(ASYS_BUILD)
 	$(MAKE) -C asys-inference install
 	$(MAKE) -C asys-bpmn install
 	$(MAKE) -C asys-human-interface install
@@ -96,7 +101,7 @@ test:
 help:
 	@printf '%s\n' \
 	  'make build         Build host commands and container images' \
-	  'make install       Install what make built under PREFIX (default: $$HOME/.local)' \
+	  'make install       Build, then install under PREFIX (default: $$HOME/.local); sudo builds as you' \
 	  'make install-host  Install core commands, agents, designs and both skills (no Docker needed)' \
 	  'make test-deps     Install Node and TUI dependencies for development tests' \
 	  'make test          Run Go, Python and Node tests (after test-deps)' \

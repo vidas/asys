@@ -1,6 +1,7 @@
 #!/bin/sh
-# Print this checkout's build ID: VERSION, then the commit, then a timestamp
-# when the tree has uncommitted changes, so a dirty build never reuses a tag.
+# Print this checkout's build ID: VERSION, then the commit, then a hash of the
+# uncommitted changes. Different changes never share a tag; rebuilding the same
+# tree reuses its ID, so a second build is a cached no-op.
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 version=$(cat "$root/VERSION")
@@ -9,7 +10,10 @@ checkout() { git -c "safe.directory=$root" -C "$root" "$@"; }
 if ! commit=$(checkout rev-parse --short=7 HEAD 2>/dev/null); then
   echo "$version"
 elif [ -n "$(checkout status --porcelain 2>/dev/null)" ]; then
-  echo "$version-$commit-dirty.$(date -u +%Y%m%dT%H%M%S)"
+  changes=$({ checkout diff HEAD --binary
+              checkout ls-files --others --exclude-standard -z | (cd "$root" && xargs -0r sha256sum --)
+            } | sha256sum | cut -c1-8)
+  echo "$version-$commit-dirty.$changes"
 else
   echo "$version-$commit"
 fi

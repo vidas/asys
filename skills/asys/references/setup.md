@@ -7,9 +7,10 @@ installed dcomp 0.3.2+ with Machine API 2. Building inference needs Go 1.25+.
 The Human terminal installs pinned dependencies in a private environment;
 worker dependencies are built into images.
 
-From the source checkout, run `make` as your own user, then `make install`
-(`sudo make install PREFIX=/usr/local` for a system prefix). Installation only
-copies what `make` built. The prefix defaults to `~/.local`; put its `bin` on
+From the source checkout, run `make install`, or
+`sudo make install PREFIX=/usr/local` for a system prefix. It builds, then
+installs; under sudo the build runs as your own user, so root never writes into
+the checkout. The prefix defaults to `~/.local`; put its `bin` on
 PATH. `DESTDIR` supports staging. `make install-host` installs core commands,
 Python modules, the default design, world resources, skills and the release
 record, without inference or the Human terminal. `asys version` shows the

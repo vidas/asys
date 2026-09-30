@@ -9,8 +9,8 @@ contracts.
 ## Install and initialize
 
 Follow the root [installation guide](../INSTALL.md) for required versions and
-the separate dcomp installation. Run `make` at the repository root, then
-`make install`, which copies what was built under `PREFIX`, with `DESTDIR` for staging.
+the separate dcomp installation. Run `make install` at the repository root; it
+builds, then installs under `PREFIX`, with `DESTDIR` for staging.
 
 ```sh
 asys-inference init --root ./state

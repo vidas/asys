@@ -20,8 +20,9 @@
   replaced; single-worker runs finish first. An interrupted update continues
   when repeated. Workflows that predate upgrade handover stop the update unless
   `--force` is given.
-- Split building from installing: `make` builds, `make install` only copies, so
-  `sudo make install` no longer leaves root-owned files in the checkout.
+- `sudo make install` builds as the invoking user and only copies as root, so
+  it no longer leaves root-owned files in the checkout. Rebuilding an unchanged
+  tree reuses its build ID and cache.
   Docker Engine 23+ with BuildKit is required.
 - Update Pi to 0.99.1 for current models and providers, including GPT-6.
   Provider payloads now carry Pi's normalized transcript, and the inference
