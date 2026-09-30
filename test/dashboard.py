@@ -267,6 +267,9 @@ class DashboardTests(unittest.TestCase):
         self.assertIn('"allEvidence": ["start", "middle", "end"]', messages[2]['displayText'])
         self.assertIn('Still present', messages[3]['displayText'])
         self.assertIn('omega', messages[3]['displayText'])
+        system = {'id': 'system', 'type': 'message', 'message': {'role': 'system', 'content': '',
+            'sections': {'preamble': 'PI_PREAMBLE'}, 'toolsAdded': []}}
+        self.assertEqual(saved_messages({'session': {'entries': [system, *entries]}}, 'agent.json', {}), messages)
         self.assertIn('Context compacted', messages[4]['displayText'])
 
     def test_selected_source_returns_full_large_session_and_signatures_do_not_consume_text_budget(self):

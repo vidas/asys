@@ -2,10 +2,11 @@ import { createServer } from 'node:http';
 import { connectNodeAdapter } from '@connectrpc/connect-node';
 import { serveOutput } from '@dcomp/component';
 import { Provider } from '@cyclo/provider/contract';
+import { getCurrentTools } from '@earendil-works/pi-ai';
 import { heartbeat } from '../asys-runtime/javascript/health.mjs';
 
 const models = ['worker'].map(name => ({ id: `fixture/${name}`, displayName: name,
-  inferenceFormat: 'pi-ai@0.84.0', contextWindowTokens: 100000n, maxOutputTokens: 8000n,
+  inferenceFormat: 'pi-ai@0.99.1', contextWindowTokens: 100000n, maxOutputTokens: 8000n,
   capabilities: { inputModalities: [1], outputModalities: [1], functionTools: true } }));
 const tool = (id, name, args) => ({ type: 'toolCall', id, name, arguments: args });
 function answer(content) {
@@ -22,7 +23,7 @@ const server = createServer(connectNodeAdapter({ routes(router) { router.service
     const details = id => JSON.parse(results.get(id).content.find(c => c.type === 'text').text).id;
     let content;
     if (request.model !== 'fixture/worker') throw new Error(`Unexpected model: ${request.model}`);
-    if (!context.tools?.some(tool => tool.name === 'start_action')) {
+    if (!getCurrentTools(context.messages).some(tool => tool.name === 'start_action')) {
       content = results.has('write') ? [{ type: 'text', text: 'The draft is ready.' }]
         : [tool('write', 'bash', { command: 'printf "draft\\n" >> proof.txt' })];
     } else if (!results.has('draft')) content = [tool('draft', 'start_action', { action: 'draft' })];

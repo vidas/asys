@@ -1,0 +1,15 @@
+{
+  "subscription": {
+    "type": "oauth",
+    "access": "eyJhbGciOiJub25lIn0.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiZml4dHVyZS1hY2NvdW50In19.signature",
+    "refresh": "fixture-refresh-token",
+    "expires": 4102444800000,
+    "accountId": "fixture-account",
+    "provider": "openai-codex"
+  },
+  "keyed": {
+    "type": "api_key",
+    "key": "fixture-api-key",
+    "provider": "openai"
+  }
+}

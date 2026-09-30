@@ -131,6 +131,15 @@ restart repair has run.
 | `/run/asys-host/channels/gateway/` | Host commands, login dialogue, and results | provider-specific shared mount |
 | TCP port `8080` | Internal health check | container loopback only |
 
+`/var/lib/cyclo-gateway` is the component's persistent `credentials` volume.
+Its name depends on the dcomp state root, system and component, not the image,
+so `asys update` mounts the same logins into the rebuilt gateway. Each
+`auth.json` entry holds a native Pi credential; a newer Pi must still read the
+records an earlier one wrote. `test/fixtures/stored-credentials/` holds one
+`auth.json` per earlier Pi release, and the stored-credentials test sends a
+request with every account in each. When changing the Pi pin, add a fixture for
+the release being replaced.
+
 ## Build and test
 
 From `asys-inference`:

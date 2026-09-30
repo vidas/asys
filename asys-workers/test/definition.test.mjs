@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { agentDefinition, agentResult, systemAgentDefinition } from '../src/agent-definition.mjs';
 import { runAgent } from '../src/agent-session.mjs';
 import { agent } from '../src/agent.mjs';
-import { assistant, model } from './helpers.mjs';
+import { assistant, conversationOf, model, systemPromptOf } from './helpers.mjs';
 
 test('the removed inference timeout flag is rejected', async () => {
   await assert.rejects(agent({ argv: ['--timeout', '1'], job: {}, env: {}, signal: new AbortController().signal },
@@ -42,7 +42,7 @@ test('named agents share environment resources and load their own memory and ski
     job, workspace, jobDirectory, definition, provider,
     signal: new AbortController().signal, save() {}, event() {} });
   assert.deepEqual(result, { final: 'Board complete', exception: null, approved: false });
-  const prompt = requests[0].context.systemPrompt;
+  const prompt = systemPromptOf(requests[0].context);
   assert.match(prompt, /Installed environment tools:\n- board-tool 1\.2\n- board-library 3\.4/);
   assert.match(prompt, /pcb retained lesson/);
   assert.match(prompt, /pcb base instructions/);
@@ -106,12 +106,12 @@ test('an external agent uses its own prompt and memory alongside shared environm
   const { context } = requests[0];
   for (const text of ['External reviewer instructions', 'External retained lesson', 'External explicit extension',
     'environment-common techniques', 'bundle-common techniques', 'reviewer-specific techniques']) {
-    assert.ok(context.systemPrompt.includes(text), text);
+    assert.ok(systemPromptOf(context).includes(text), text);
   }
-  assert.match(context.systemPrompt, /Installed environment tools:\n- environment-tool 2\.0/);
-  assert.doesNotMatch(context.systemPrompt, /UNSELECTED_BUNDLE_TOOLS|UNSELECTED_WORKSPACE_TOOLS/);
-  assert.doesNotMatch(context.systemPrompt, /Builtin reviewer instructions|Builtin private memory/);
-  assert.deepEqual(context.messages[0].content, [{ type: 'text', text: 'Review the latest result.' }]);
+  assert.match(systemPromptOf(context), /Installed environment tools:\n- environment-tool 2\.0/);
+  assert.doesNotMatch(systemPromptOf(context), /UNSELECTED_BUNDLE_TOOLS|UNSELECTED_WORKSPACE_TOOLS/);
+  assert.doesNotMatch(systemPromptOf(context), /Builtin reviewer instructions|Builtin private memory/);
+  assert.deepEqual(conversationOf(context)[0].content, [{ type: 'text', text: 'Review the latest result.' }]);
   const state = JSON.parse(await readFile(join(jobDirectory, 'agent.json'), 'utf8'));
   assert.equal(state.agent.environment, environment);
   assert.equal(state.agent.directory, join(external, 'agents/reviewer'));
@@ -159,11 +159,11 @@ test('the shared simple agent uses the shared system prompt without extra role i
   const packaged = await readFile(new URL('../../python/asys/system_agents/simple/prompt.md', import.meta.url), 'utf8');
   assert.equal(packaged, '');
   const shared = await readFile(new URL('../src/system.md', import.meta.url), 'utf8');
-  assert.ok(requests[0].context.systemPrompt.includes(shared.trim()));
-  assert.match(requests[0].context.systemPrompt, /Installed environment tools:\n- shared-tool 5\.0/);
-  assert.doesNotMatch(requests[0].context.systemPrompt, /Agent instructions:/);
-  assert.doesNotMatch(requests[0].context.systemPrompt, /UNSELECTED_ENVIRONMENT_AGENT|UNSELECTED_ENVIRONMENT_MEMORY/);
-  assert.deepEqual(requests[0].context.messages[0].content, [{ type: 'text', text: 'Complete the assignment.' }]);
+  assert.ok(systemPromptOf(requests[0].context).includes(shared.trim()));
+  assert.match(systemPromptOf(requests[0].context), /Installed environment tools:\n- shared-tool 5\.0/);
+  assert.doesNotMatch(systemPromptOf(requests[0].context), /Agent instructions:/);
+  assert.doesNotMatch(systemPromptOf(requests[0].context), /UNSELECTED_ENVIRONMENT_AGENT|UNSELECTED_ENVIRONMENT_MEMORY/);
+  assert.deepEqual(conversationOf(requests[0].context)[0].content, [{ type: 'text', text: 'Complete the assignment.' }]);
   const { agent: state } = JSON.parse(await readFile(join(jobDirectory, 'agent.json'), 'utf8'));
   assert.equal(state.name, 'simple');
   assert.equal(state.model, model.id);
@@ -191,7 +191,7 @@ for (const [label, contents] of [['absent', null], ['empty', ' \n\t'], ['populat
       job: { id: 'tools' }, workspace, jobDirectory: join(root, 'job'),
       definition: systemAgentDefinition(environment, 'simple'), provider,
       signal: new AbortController().signal, save() {}, event() {} });
-    const prompt = requests[0].context.systemPrompt;
+    const prompt = systemPromptOf(requests[0].context);
     if (contents?.trim()) assert.match(prompt, /Installed environment tools:\n- compiler 1\.0/);
     else assert.doesNotMatch(prompt, /Installed environment tools:/);
     assert.doesNotMatch(prompt, /UNSELECTED_WORKSPACE_TOOLS/);

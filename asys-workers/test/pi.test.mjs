@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { runTestAgent as runAgent } from './helpers.mjs';
+import { runTestAgent as runAgent, systemPromptOf, toolsOf } from './helpers.mjs';
 import { groupModels, listProviderModels, streamProvider } from '../src/provider-adapter.mjs';
 import { Code, ConnectError } from '@connectrpc/connect';
 import { createResourceExhaustedError } from '@cyclo/provider/errors';
@@ -220,19 +220,19 @@ test('Pi discovers and reads skills supplied by the selected environment', async
   await runAgent({ config: { model: 'fixture/model', prompt: 'Read the synthesis skill.', maxSteps: 3, options: {} },
     job: { id: 'skills' }, workspace, environmentDirectory,
     signal: new AbortController().signal, provider, save() {}, event() {} });
-  assert.match(requests[0].context.systemPrompt, /Environment-specific synthesis instructions/);
+  assert.match(systemPromptOf(requests[0].context), /Environment-specific synthesis instructions/);
   for (const { context } of requests) {
-    assert.match(context.systemPrompt, /^You are a Renaissance man:/);
-    assert.doesNotMatch(context.systemPrompt, /operating inside pi|Pi documentation|approved|success\s*[:=]/);
-    assert.doesNotMatch(context.systemPrompt, /PROJECT_(?:INSTRUCTIONS|SYSTEM|APPEND_SYSTEM)_MARKER/);
-    assert.doesNotMatch(context.systemPrompt, /ASYS_RESULT/);
-    assert.match(context.systemPrompt, /"exception"/);
+    assert.match(systemPromptOf(context), /^You are a Renaissance man:/);
+    assert.doesNotMatch(systemPromptOf(context), /operating inside pi|Pi documentation|approved|success\s*[:=]/);
+    assert.doesNotMatch(systemPromptOf(context), /PROJECT_(?:INSTRUCTIONS|SYSTEM|APPEND_SYSTEM)_MARKER/);
+    assert.doesNotMatch(systemPromptOf(context), /ASYS_RESULT/);
+    assert.match(systemPromptOf(context), /"exception"/);
     for (const name of ['read', 'bash', 'edit', 'write']) {
-      assert.ok(context.tools.some(tool => tool.name === name && tool.parameters));
-      assert.match(context.systemPrompt, new RegExp(`^- ${name}: .+`, 'm'));
+      assert.ok(toolsOf(context).some(tool => tool.name === name && tool.parameters));
+      assert.match(systemPromptOf(context), new RegExp(`^- ${name}: .+`, 'm'));
     }
   }
-  assert.equal(await readFile(join(workspace, 'test-job/.pi/system-prompt.txt'), 'utf8'), requests.at(-1).context.systemPrompt);
+  assert.equal(await readFile(join(workspace, 'test-job/.pi/system-prompt.txt'), 'utf8'), systemPromptOf(requests.at(-1).context));
   assert.ok(requests[1].context.messages.some(message => message.role === 'toolResult' && JSON.stringify(message.content).includes('ENVIRONMENT_SKILL_MARKER')));
 });
 
@@ -260,12 +260,12 @@ test('Pi loads and executes tools from the selected environment extensions direc
     async *infer(request) {
       const frame = JSON.parse(request.payload);
       requests.push(frame);
-      assert.ok(frame.context.tools.some(tool => tool.name === 'environment_lookup'));
-      assert.match(frame.context.systemPrompt, /^- environment_lookup: Look up environment reference data\./m);
-      assert.match(frame.context.systemPrompt, /Verify the returned reference version/);
-      assert.match(frame.context.systemPrompt, /ENVIRONMENT_PROMPT_MARKER/);
-      assert.doesNotMatch(frame.context.systemPrompt, /^- edit:|edits\[\]/m);
-      assert.ok(!frame.context.tools.some(tool => tool.name === 'edit'));
+      assert.ok(toolsOf(frame.context).some(tool => tool.name === 'environment_lookup'));
+      assert.match(systemPromptOf(frame.context), /^- environment_lookup: Look up environment reference data\./m);
+      assert.match(systemPromptOf(frame.context), /Verify the returned reference version/);
+      assert.match(systemPromptOf(frame.context), /ENVIRONMENT_PROMPT_MARKER/);
+      assert.doesNotMatch(systemPromptOf(frame.context), /^- edit:|edits\[\]/m);
+      assert.ok(!toolsOf(frame.context).some(tool => tool.name === 'edit'));
       const message = requests.length === 1
         ? assistant([{ type: 'toolCall', id: 'lookup', name: 'environment_lookup', arguments: { query: 'timer' } }], 'toolUse')
         : assistant([{ type: 'text', text: JSON.stringify({ final: 'Looked up the reference.', exception: null }) }]);
@@ -304,7 +304,7 @@ test('Pi SDK runs its real shell tool and sends native frames through Provider',
       assert.equal(request.model, 'fixture/model');
       const frame = JSON.parse(request.payload);
       requests.push(frame);
-      assert.ok(frame.context.tools.some(tool => tool.name === 'bash'));
+      assert.ok(toolsOf(frame.context).some(tool => tool.name === 'bash'));
       const message = requests.length === 1
         ? assistant([{ type: 'toolCall', id: 'write-file', name: 'bash', arguments: { command: 'printf "from Pi\\n" > proof.txt' } }], 'toolUse')
         : assistant([{ type: 'text', text: JSON.stringify({ final: 'Created proof.txt', exception: null }) }]);

@@ -12,7 +12,7 @@ import { Provider } from '@cyclo/provider/contract';
 import { PreparedQueue as Queue } from '../../asys-runtime/test/fixtures.mjs';
 import { HumanService } from '../../asys-human-interface/src/human-service.mjs';
 import { humanServer } from '../../asys-human-interface/src/human-server.mjs';
-import { assistant, model } from './helpers.mjs';
+import { assistant, conversationOf, model, systemPromptOf, toolsOf } from './helpers.mjs';
 import { createPiAdapter } from '../../asys-inference/components/gateway/src/pi-adapter.mjs';
 import { createPoolerServices } from '../../asys-inference/components/pooler/src/services.mjs';
 import { parseArguments as poolArguments } from '../../asys-inference/components/pooler/src/config.mjs';
@@ -226,13 +226,13 @@ test('the environment supplies agent memory; job data cannot replace the global 
   const state = await f.queue.wait('review', { timeoutMs: 10000 });
   assert.equal(state.status, 'done', state.error);
   const { context } = requests[0];
-  assert.doesNotMatch(context.systemPrompt, /JOB_DATA_MUST_NOT_CONFIGURE_SYSTEM_PROMPT|ASYS_RESULT/);
-  assert.match(context.systemPrompt, /RETAINED_LESSON/);
-  assert.ok(!context.tools.some(tool => ['list_actions', 'start_action', 'wait_action'].includes(tool.name)));
+  assert.doesNotMatch(systemPromptOf(context), /JOB_DATA_MUST_NOT_CONFIGURE_SYSTEM_PROMPT|ASYS_RESULT/);
+  assert.match(systemPromptOf(context), /RETAINED_LESSON/);
+  assert.ok(!toolsOf(context).some(tool => ['list_actions', 'start_action', 'wait_action'].includes(tool.name)));
   const common = (await readFile(new URL('../src/system.md', import.meta.url), 'utf8')).trim();
-  assert.ok(context.systemPrompt.startsWith(common + '\n\n'));
-  assert.deepEqual(context.messages[0].content, [{ type: 'text', text: prompt }]);
-  assert.equal(await readFile(join(f.queue.executionDirectory('review'), '.pi/system-prompt.txt'), 'utf8'), context.systemPrompt);
+  assert.ok(systemPromptOf(context).startsWith(common + '\n\n'));
+  assert.deepEqual(conversationOf(context)[0].content, [{ type: 'text', text: prompt }]);
+  assert.equal(await readFile(join(f.queue.executionDirectory('review'), '.pi/system-prompt.txt'), 'utf8'), systemPromptOf(context));
 });
 
 for (const limit of [undefined, 2]) {
@@ -278,7 +278,7 @@ for (const fields of [
     const server = createServer(connectNodeAdapter({ routes(router) { router.service(Provider, {
       listModels() { return { models: [model] }; },
       async *infer(request) {
-        assert.doesNotMatch(JSON.parse(request.payload).context.systemPrompt, /approved|success\s*[:=]/);
+        assert.doesNotMatch(systemPromptOf(JSON.parse(request.payload).context), /approved|success\s*[:=]/);
         yield { payload: JSON.stringify({ type: 'done', reason: 'stop',
           message: assistant([{ type: 'text', text: JSON.stringify(result) }]) }) };
       },
@@ -314,10 +314,10 @@ test('retrying a failed agent starts the stage again with its original prompt an
       ], 'toolUse');
       else if (turn === 2) message = assistant([{ type: 'text', text: '{"final":"Unable to finish routing","exception":"Routing incomplete","old_field":"do not carry forward"}' }]);
       else if (turn === 3) {
-        assert.equal(frame.context.messages.length, 1);
-        assert.equal(frame.context.messages[0].role, 'user');
-        assert.deepEqual(frame.context.messages[0].content, [{ type: 'text', text: 'Route the board.' }]);
-        assert.doesNotMatch(frame.context.systemPrompt, /ASYS_RESULT/);
+        assert.equal(conversationOf(frame.context).length, 1);
+        assert.equal(conversationOf(frame.context)[0].role, 'user');
+        assert.deepEqual(conversationOf(frame.context)[0].content, [{ type: 'text', text: 'Route the board.' }]);
+        assert.doesNotMatch(systemPromptOf(frame.context), /ASYS_RESULT/);
         await assert.rejects(readFile(nextResult), { code: 'ENOENT' });
         message = assistant([{ type: 'toolCall', id: 'inspect', name: 'read', arguments: { path: board } }], 'toolUse');
       } else if (turn === 4) {
@@ -364,8 +364,8 @@ test('inference recovery discards an incomplete tool call without consuming an a
           arguments: { path: target, content: 'Incomplete generation' } }], 'error'), errorMessage: 'terminated' };
         yield { payload: JSON.stringify({ type: 'error', reason: 'error', error: message }) };
       } else {
-        assert.equal(frame.context.messages.length, 1);
-        assert.deepEqual(frame.context.messages[0].content, [{ type: 'text', text: 'Perform the original stage.' }]);
+        assert.equal(conversationOf(frame.context).length, 1);
+        assert.deepEqual(conversationOf(frame.context)[0].content, [{ type: 'text', text: 'Perform the original stage.' }]);
         yield { payload: JSON.stringify({ type: 'done', reason: 'stop', message: assistant([{ type: 'text', text: JSON.stringify({ final: 'Stage rerun.', exception: null }) }]) }) };
       }
     },
@@ -377,7 +377,7 @@ test('inference recovery discards an incomplete tool call without consuming an a
   assert.equal(requests.length, 2);
   const saved = JSON.parse(await readFile(join(directory, 'agent.json'), 'utf8'));
   assert.equal(saved.agent.steps, 1);
-  assert.ok(!saved.agent.session.entries.some(e => e.message?.content?.some(c => c.id === 'unfinished-write')));
+  assert.ok(!saved.agent.session.entries.some(e => e.message?.role === 'assistant' && e.message.content.some(c => c.id === 'unfinished-write')));
   await assert.rejects(readFile(target), { code: 'ENOENT' });
 });
 
@@ -391,7 +391,7 @@ test('an interrupted Pi job restarts the assignment without carrying its result 
     async *infer(request, context) {
       if (++requests === 3) {
         const frame = JSON.parse(request.payload);
-        assert.deepEqual(frame.context.messages.map(m => m.content), [[{ type: 'text', text: 'Review the design.' }]]);
+        assert.deepEqual(conversationOf(frame.context).map(m => m.content), [[{ type: 'text', text: 'Review the design.' }]]);
       }
       if (requests === 2) {
         waiting.resolve();
@@ -488,10 +488,10 @@ for (const phase of ['implement', 'verify']) {
           const { phase: current } = data;
           assert.ok(Object.hasOwn(counts, current), 'goals start with implementation and use no contract phases');
           if (current === 'verify' || counts[current] === 0) {
-            assert.equal(context.messages.length, 1, 'verification remains fresh, including human retries');
+            assert.equal(conversationOf(context).length, 1, 'verification remains fresh, including human retries');
           } else {
-            assert.equal(context.messages.length, 3, 'the implementation human retry retains its earlier conversation');
-            assert.match(JSON.stringify(context.messages[1].content), /Input missing/);
+            assert.equal(conversationOf(context).length, 3, 'the implementation human retry retains its earlier conversation');
+            assert.match(JSON.stringify(conversationOf(context)[1].content), /Input missing/);
           }
           if (counts[current] > 0) assert.equal(data.humanGuidance[0].answer.guidance, 'The input is now available.');
           const help = ++counts[current] === 1 && current === phase;
@@ -560,14 +560,14 @@ test('a runtime goal continues ordinary implementation turns and reviews only th
       if (data.phase === 'implement') {
         implementations++;
         assert.equal(reviews, 0, 'progress reports must not schedule a reviewer');
-        assert.equal(context.messages.length, implementations * 2 - 1);
+        assert.equal(conversationOf(context).length, implementations * 2 - 1);
         if (implementations > 1) assert.match(JSON.stringify(context.messages), /FIRST_PROGRESS_MARKER/);
         result = { final: implementations === 1 ? 'FIRST_PROGRESS_MARKER' : 'Further work performed.', exception: null,
           goal_status: implementations === 3 ? 'review' : 'continue' };
       } else {
         assert.equal(data.phase, 'verify');
         reviews++;
-        assert.equal(context.messages.length, 1);
+        assert.equal(conversationOf(context).length, 1);
         assert.doesNotMatch(JSON.stringify(context.messages), /FIRST_PROGRESS_MARKER/);
         result = { final: 'Observed the complete artifact.', exception: null, coverage: 'complete',
           criteria: [{ id: 'C1', requirement: 'Produce an artifact', basis: 'Original user request', status: 'satisfied',
@@ -598,8 +598,8 @@ for (const corrected of [true, false]) {
       listModels() { return { models: [model] }; },
       async *infer(request) {
         const { context } = JSON.parse(request.payload);
-        assert.equal(context.messages.length, 1, 'each verification correction is independent');
-        const data = JSON.parse(context.messages[0].content[0].text.split('Assignment data:\n')[1]);
+        assert.equal(conversationOf(context).length, 1, 'each verification correction is independent');
+        const data = JSON.parse(conversationOf(context)[0].content[0].text.split('Assignment data:\n')[1]);
         let result;
         if (data.phase === 'implement') {
           implementations++;

@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { goal } from '../src/goal.mjs';
 import { systemModel } from '../src/system-model.mjs';
 import { HumanService } from '../../asys-human-interface/src/human-service.mjs';
-import { assistant, model } from './helpers.mjs';
+import { assistant, conversationOf, model, systemPromptOf } from './helpers.mjs';
 
 const implemented = { final: 'IMPLEMENTER_CLAIMS_SUCCESS', exception: null, goal_status: 'review' };
 const progress = { final: 'Useful progress made; required work remains.', exception: null, goal_status: 'continue' };
@@ -589,7 +589,7 @@ test('real sessions continue partial work, retain review feedback and isolate fi
   const provider = {
     async listModels() { return { models: [model] }; },
     async *infer(request) {
-      const frame = JSON.parse(request.payload), messages = frame.context.messages;
+      const frame = JSON.parse(request.payload), messages = conversationOf(frame.context);
       frames.push(frame);
       const users = messages.filter(m => m.role === 'user');
       const data = JSON.parse(users.at(-1).content[0].text.split('Assignment data:\n')[1]);
@@ -597,8 +597,8 @@ test('real sessions continue partial work, retain review feedback and isolate fi
       let message;
       if (initialRequest) {
         const shared = await readFile(new URL('../src/system.md', import.meta.url), 'utf8');
-        assert.ok(frame.context.systemPrompt.includes(shared.trim()));
-        assert.doesNotMatch(frame.context.systemPrompt, /Agent instructions:|ENVIRONMENT_PRIVATE/);
+        assert.ok(systemPromptOf(frame.context).includes(shared.trim()));
+        assert.doesNotMatch(systemPromptOf(frame.context), /Agent instructions:|ENVIRONMENT_PRIVATE/);
         if (data.phase === 'implement') {
           implementationTurns++;
           if (implementationTurns === 2) {

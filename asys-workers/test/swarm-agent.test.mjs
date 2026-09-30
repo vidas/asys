@@ -13,7 +13,7 @@ import { connectNodeAdapter } from '@connectrpc/connect-node';
 import { Provider } from '@cyclo/provider/contract';
 import { createResourceExhaustedError } from '@cyclo/provider/errors';
 import { swarmAgent } from '../src/swarm-agent.mjs';
-import { assistant, model } from './helpers.mjs';
+import { assistant, conversationOf, model, systemPromptOf, toolsOf } from './helpers.mjs';
 
 const actionSchema = { type: 'object', properties: {
   type: { enum: ['move', 'rest'] }, dx: { type: 'integer', minimum: -1, maximum: 1 },
@@ -123,15 +123,15 @@ test('a swarm decision uses only submit_plan, selected prompt, actual usage and 
   assert.equal(f.requests.length, 1);
   const { request, frame, options } = f.requests[0];
   assert.equal(request.model, 'fixture/model');
-  assert.deepEqual(frame.context.tools.map(tool => tool.name), ['submit_plan']);
-  assert.match(frame.context.systemPrompt, /FORAGER_PROMPT/);
-  assert.match(frame.context.systemPrompt, /WORLD_RULES/);
-  assert.doesNotMatch(frame.context.systemPrompt, /WORKSPACE_INJECTION/);
+  assert.deepEqual(toolsOf(frame.context).map(tool => tool.name), ['submit_plan']);
+  assert.match(systemPromptOf(frame.context), /FORAGER_PROMPT/);
+  assert.match(systemPromptOf(frame.context), /WORLD_RULES/);
+  assert.doesNotMatch(systemPromptOf(frame.context), /WORKSPACE_INJECTION/);
   assert.equal(frame.options.temperature, 0.3);
   assert.equal(frame.options.maxTokens, 700);
   assert.equal(frame.options.signal, undefined);
   assert.ok(options.signal instanceof AbortSignal);
-  const observation = JSON.parse(frame.context.messages[0].content[0].text);
+  const observation = JSON.parse(conversationOf(frame.context)[0].content[0].text);
   assert.equal(observation.mission, f.job.input.mission);
   assert.deepEqual(observation.objective, { gardens: 6, survivingTurns: 12 });
   assert.equal(observation.agent, 'a-4');
@@ -151,10 +151,10 @@ test('models without function tools receive a schema and return strict JSON', as
   const f = await fixture(t, { models: [{ ...model, capabilities: { ...model.capabilities, functionTools: false } }],
     response: assistant([{ type: 'text', text: JSON.stringify(plan) }]) });
   assert.deepEqual((await f.run()).actions, plan.actions);
-  assert.deepEqual(f.requests[0].frame.context.tools, []);
-  assert.match(f.requests[0].frame.context.systemPrompt, /"maxItems":2/);
-  assert.match(f.requests[0].frame.context.systemPrompt, /"enum":\["move","rest"\]/);
-  assert.equal(JSON.parse(f.requests[0].frame.context.messages[0].content[0].text).objective, null);
+  assert.deepEqual(toolsOf(f.requests[0].frame.context), []);
+  assert.match(systemPromptOf(f.requests[0].frame.context), /"maxItems":2/);
+  assert.match(systemPromptOf(f.requests[0].frame.context), /"enum":\["move","rest"\]/);
+  assert.equal(JSON.parse(conversationOf(f.requests[0].frame.context)[0].content[0].text).objective, null);
 });
 
 test('effective reasoning options are saved before inference and explicit settings win', async t => {
@@ -195,12 +195,12 @@ test('shared and selected-agent skill instructions reach Provider without resour
     await writeFile(join(path, 'resource.txt'), 'RESOURCE_CONTENT_MUST_NOT_LOAD');
   }
   await f.run();
-  const prompt = f.requests[0].frame.context.systemPrompt;
+  const prompt = systemPromptOf(f.requests[0].frame.context);
   assert.match(prompt, /SHARED_SKILL/);
   assert.match(prompt, /WORKER_SKILL/);
   assert.match(prompt, /SELECTED_SKILL/);
   assert.doesNotMatch(prompt, /UNRELATED_AGENT_SKILL|WORKSPACE_SKILL|RESOURCE_CONTENT_MUST_NOT_LOAD/);
-  assert.deepEqual(f.requests[0].frame.context.tools.map(tool => tool.name), ['submit_plan']);
+  assert.deepEqual(toolsOf(f.requests[0].frame.context).map(tool => tool.name), ['submit_plan']);
   assert.equal((await f.saved()).agent.skills.length, 3);
 });
 
@@ -237,7 +237,7 @@ test('local action schema references keep their meaning inside the function tool
   const schema = { definitions: { action: actionSchema }, $ref: '#/definitions/action' };
   const f = await fixture(t, { input: { actionSchema: schema } });
   await f.run();
-  const validate = new Ajv().compile(f.requests[0].frame.context.tools[0].parameters);
+  const validate = new Ajv().compile(toolsOf(f.requests[0].frame.context)[0].parameters);
   assert.equal(validate(plan), true, JSON.stringify(validate.errors));
   assert.equal(validate({ ...plan, actions: [{ type: 'shell' }] }), false);
 });
@@ -247,7 +247,7 @@ test('literal JSON action values are unchanged when embedding an action schema',
   const decision = { actions: [action], memory: null };
   const f = await fixture(t, { input: { actionSchema: { enum: [action] } }, response: toolResponse(decision) });
   await f.run();
-  const validate = new Ajv().compile(f.requests[0].frame.context.tools[0].parameters);
+  const validate = new Ajv().compile(toolsOf(f.requests[0].frame.context)[0].parameters);
   assert.equal(validate(decision), true, JSON.stringify(validate.errors));
 });
 

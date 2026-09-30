@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runTestAgent as runAgent } from './helpers.mjs';
+import { runTestAgent as runAgent, toolsOf } from './helpers.mjs';
 import { assistant, model } from './helpers.mjs';
 import { createResourceExhaustedError } from '@cyclo/provider/errors';
 
@@ -23,7 +23,7 @@ async function fixture(t, { stopReason = 'length', rounds = 1, maxSteps = 12 } =
       const frame = JSON.parse(request.payload);
       f.requests.push(frame);
       let reply;
-      if (!frame.context.tools?.length) {
+      if (!toolsOf(frame.context).length) {
         f.onSummary();
         signal.throwIfAborted();
         reply = message([{ type: 'text', text: JSON.stringify({ final: 'The large tool output has been inspected. Continue the task.', exception: null }) }]);

@@ -40,6 +40,12 @@ containing a Pi call frame; every response payload is one JSON string containing
 a native Pi `AssistantMessageEvent`. Only the Pi endpoints encode or decode
 these strings. Relays forward them unchanged.
 
+The call frame's context is Pi's normalized transcript: the system prompt and
+tool declarations travel as `system` messages, not as context fields. Cyclo's Pi
+format identifier names the pinned `pi-ai` release, for example
+`pi-ai@0.99.1`. Changing the pin changes the identifier, so every Pi endpoint in
+a chain must move to the new release together.
+
 The package exports the public-ID helpers plus `PI_INFERENCE_FORMAT`,
 `encodePayload()`, and `decodePayload()` from `@cyclo/provider/protocol`. The
 payload helpers provide JSON framing only. They contain no inference

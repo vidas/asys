@@ -143,6 +143,9 @@ def render(agent, *, current_turn=False):
             continue
         message = entry.get("message", {})
         role = message.get("role", "message")
+        if role == "system":
+            # Pi records its own prompt sections; the prompt actually sent is .pi/system-prompt.txt.
+            continue
         label = {"user": "User", "assistant": "Assistant", "system": "System"}.get(role, role)
         if role == "toolResult":
             label = f"Tool result: {message.get('toolName', 'tool')}{' (error)' if message.get('isError') else ''}"

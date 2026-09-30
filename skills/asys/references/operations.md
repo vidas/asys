@@ -74,6 +74,13 @@ inference and Human services. A workflow upgrade changes only that run's owned
 engine, workers and worlds. It leaves shared inference, shared Human and
 unrelated runs untouched. See [setup](setup.md#update) for build commands.
 
+`asys update` keeps inference logins: the gateway's credentials volume belongs
+to the state, not the image. A release that changes the pinned Pi version also
+changes the inference format.
+After `asys update`, shared inference advertises only the new format, and new
+agent jobs of active runs fail with no usable model until those runs are
+upgraded.
+
 ```sh
 source /path/to/state/asys-env
 asys status RUN

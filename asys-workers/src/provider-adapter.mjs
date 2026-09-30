@@ -1,7 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 
 import { Code, ConnectError } from "@connectrpc/connect";
-import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, normalizeContext } from "@earendil-works/pi-ai";
 import { isContextOverflow, isRetryableAssistantError } from "@earendil-works/pi-ai/compat";
 import { Modality } from "@cyclo/provider/contract";
 import {
@@ -106,7 +106,9 @@ async function pump(output, client, publicId, model, context, options, { now, sl
     const request = Object.freeze({
       model: publicId,
       payload: encodePayload({
-        context: { ...context, messages: context.messages.map(toProviderMessage) },
+        // Pi's normalized transcript is the one payload shape: the system prompt
+        // and tools travel as system messages, whichever shorthand the caller used.
+        context: { messages: normalizeContext(context).messages.map(toProviderMessage) },
         options: inferenceOptions(options),
       }),
     });

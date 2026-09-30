@@ -8,6 +8,9 @@
 - Require dcomp 0.3.2 or newer for its disconnected pending-connection fix.
   Pin the inference Go dependency to v0.3.2 and remove the copied Go source
   override so builds use the published module.
+- Update Pi to 0.99.1 for current models and providers. Provider payloads now
+  carry Pi's normalized transcript, and the inference format becomes
+  `pi-ai@0.99.1`: update shared inference and upgrade active runs together.
 
 ## 0.2.0
 

@@ -118,7 +118,9 @@ def saved_messages(agent, relative, metadata, *, current_turn=False):
     for index, entry in enumerate(entries):
         if entry.get('type') == 'compaction':
             original = {'role': 'context', 'content': [{'type': 'text', 'text': entry.get('summary', '')}]}
-        elif entry.get('type') == 'message' and isinstance(entry.get('message'), dict):
+        elif (entry.get('type') == 'message' and isinstance(entry.get('message'), dict)
+              and entry['message'].get('role') != 'system'):
+            # As in transcripts, Pi's recorded prompt sections are not what the model received.
             original = entry['message']
         else:
             continue

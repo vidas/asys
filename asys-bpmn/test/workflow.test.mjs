@@ -14,7 +14,7 @@ import { AsyncStore as Store } from '../src/async-store.mjs';
 import { WorkflowRuntime } from '../src/runtime.mjs';
 import { ENGINE } from '../src/engine.mjs';
 import { Actions } from '../../asys-workers/src/actions.mjs';
-import { assistant, model } from '../../asys-workers/test/helpers.mjs';
+import { assistant, conversationOf, model, systemPromptOf, toolsOf } from '../../asys-workers/test/helpers.mjs';
 import { workflow, flow, until } from './helpers.mjs';
 
 const executor = fileURLToPath(new URL('../../asys-runtime/tools/asys-runtime', import.meta.url));
@@ -114,8 +114,8 @@ for (const verified of [true, false]) {
       async *infer(request) {
         assert.equal(request.model, model.id);
         const { context } = JSON.parse(request.payload);
-        assert.equal(context.messages.length, 1);
-        const { phase } = JSON.parse(context.messages[0].content[0].text.split('Assignment data:\n')[1]);
+        assert.equal(conversationOf(context).length, 1);
+        const { phase } = JSON.parse(conversationOf(context)[0].content[0].text.split('Assignment data:\n')[1]);
         phases.push(phase);
         const result = {
           implement: { final: 'Implementation finished.', exception: null, goal_status: 'review' },
@@ -338,8 +338,8 @@ test('resume reruns the failed agent stage without rerunning its completed prede
   assert.notEqual(replacement.id, jobs.design.id);
   assert.equal(await readFile(join((await queue.paths(replacement.id)).directory, 'input.json'), 'utf8'), failedInput);
   assert.equal(requests.length, 2);
-  assert.equal(requests[1].messages.length, 1);
-  assert.match(requests[1].messages[0].content[0].text, /^Design the board\./);
+  assert.equal(conversationOf(requests[1]).length, 1);
+  assert.match(conversationOf(requests[1])[0].content[0].text, /^Design the board\./);
   assert.equal(Object.values(f.runtime.record('run').jobs).find(job => job.activityId === 'after').status, 'completed');
 });
 
@@ -1003,7 +1003,7 @@ for (const handled of [true, false]) {
       async *infer(request) {
         const { context } = JSON.parse(request.payload);
         requests.push(context);
-        assert.match(context.systemPrompt, /^You are a Renaissance man:/);
+        assert.match(systemPromptOf(context), /^You are a Renaissance man:/);
         const task = context.messages.find(message => message.role === 'user').content;
         const recovering = JSON.stringify(task).includes('Recover: ' + reason);
         const message = assistant([{ type: 'text', text: JSON.stringify({
@@ -1046,7 +1046,7 @@ for (const handled of [true, false]) {
     assert.equal(Object.hasOwn(state.result, 'success'), false);
     assert.equal(state.artifacts, undefined);
     assert.equal(requests.length, handled ? 2 : 1);
-    assert.equal(await readFile(join((await queue.paths(failed.id)).directory, '.pi/system-prompt.txt'), 'utf8'), requests[0].systemPrompt);
+    assert.equal(await readFile(join((await queue.paths(failed.id)).directory, '.pi/system-prompt.txt'), 'utf8'), systemPromptOf(requests[0]));
   });
 }
 
@@ -1069,8 +1069,8 @@ test('an explicitly enabled BPMN extension gives a Pi coordinator its action too
     async *infer(request) {
       const { context } = JSON.parse(request.payload);
       frames.push(context);
-      assert.doesNotMatch(context.systemPrompt, /Job artifacts: input\//);
-      assert.ok(context.tools.some(tool => tool.name === 'start_action'));
+      assert.doesNotMatch(systemPromptOf(context), /Job artifacts: input\//);
+      assert.ok(toolsOf(context).some(tool => tool.name === 'start_action'));
       const message = frames.length === 1
         ? assistant([{ type: 'toolCall', id: 'choose', name: 'start_action', arguments: { action: 'work' } }], 'toolUse')
         : frames.length === 2

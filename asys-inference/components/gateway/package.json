@@ -15,7 +15,7 @@
     "@cyclo/component": "file:../protocol/component",
     "@cyclo/gateway-protocol": "file:../protocol/gateway",
     "@cyclo/provider": "file:../protocol/provider",
-    "@earendil-works/pi-ai": "0.84.0"
+    "@earendil-works/pi-ai": "0.99.1"
   },
   "engines": {
     "node": ">=22.19.0"

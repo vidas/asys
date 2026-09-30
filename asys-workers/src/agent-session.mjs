@@ -1,6 +1,7 @@
 import { makeDirectory, prepareFile } from '../../asys-runtime/javascript/permissions.mjs';
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
+import { getCurrentSystemPrompt } from '@earendil-works/pi-ai';
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
 import { clone, requiredString } from './values.mjs';
 import { agentResult } from './agent-definition.mjs';
@@ -35,7 +36,8 @@ export async function runAgent({ config, job, signal, provider, workspace: cwd, 
       snapshot();
       const promptFile = join(agentDir, 'system-prompt.txt');
       prepareFile(promptFile);
-      writeFileSync(promptFile, context.systemPrompt ?? '');
+      // Pi carries the prompt as transcript system messages, not a context field.
+      writeFileSync(promptFile, getCurrentSystemPrompt(context.messages));
     },
   });
   // streamProvider owns transport recovery for turns and compaction alike.

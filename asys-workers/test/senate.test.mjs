@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Code, ConnectError } from '@connectrpc/connect';
 import { senate } from '../src/senate.mjs';
-import { assistant, model } from './helpers.mjs';
+import { assistant, model, systemPromptOf, toolsOf } from './helpers.mjs';
 
 const configuration = () => ({ version: 1, princeps: { name: 'Cicero', prompt: 'CHAIR_PERSONA' },
   senators: [{ name: 'Cato', prompt: 'CAUTIOUS_PERSONA' }, { name: 'Caesar', prompt: 'AMBITIOUS_PERSONA' }] });
@@ -394,11 +394,11 @@ test('real Pi sessions route participant models and let every senator execute en
       const data = JSON.parse(users.at(-1).content[0].text.split('Assignment data:\n')[1]);
       const participant = participants.find(participant => participant.name === data.participant);
       assert.equal(request.model, participant.model);
-      assert.ok(frame.context.systemPrompt.includes(participant.prompt));
+      assert.ok(systemPromptOf(frame.context).includes(participant.prompt));
       for (const other of participants.filter(other => other !== participant)) {
-        assert.ok(!frame.context.systemPrompt.includes(other.prompt), 'personas remain separate from other participants');
+        assert.ok(!systemPromptOf(frame.context).includes(other.prompt), 'personas remain separate from other participants');
       }
-      assert.ok(frame.context.tools.some(tool => tool.name === 'web_search'));
+      assert.ok(toolsOf(frame.context).some(tool => tool.name === 'web_search'));
       const firstInference = messages.at(-1).role === 'user';
       let message;
       if (firstInference) {

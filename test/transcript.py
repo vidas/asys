@@ -135,6 +135,14 @@ class TranscriptTest(unittest.TestCase):
                     "role": role, "content": text}}]}})
                 self.assertIn(text, "\n".join(lines))
 
+    def test_pi_system_entries_are_not_shown_as_conversation(self):
+        system = {"role": "system", "content": "", "sections": {"preamble": "PI_PREAMBLE"},
+                  "toolsAdded": [{"name": "bash", "description": "Run", "parameters": {}}]}
+        lines = render({"session": {"entries": [
+            {"type": "message", "id": "system", "parentId": None, "message": system},
+            {"type": "message", "id": "user", "parentId": "system", "message": {"role": "user", "content": "Do it."}}]}})
+        self.assertEqual(lines, ["User", "Do it.", ""])
+
     def test_goal_reports_and_continuation_history_for_all_saved_versions(self):
         self.checkpoint.unlink()
         phase = self.root / "attempts/2/implement-1"
