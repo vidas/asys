@@ -9,8 +9,8 @@ contracts.
 ## Install and initialize
 
 Follow the root [installation guide](../INSTALL.md) for required versions and
-the separate dcomp installation. `make build` builds the host binary;
-`make install` then installs it under `PREFIX`, with `DESTDIR` for staging.
+the separate dcomp installation. Run `make` at the repository root, then
+`make install`, which copies what was built under `PREFIX`, with `DESTDIR` for staging.
 
 ```sh
 asys-inference init --root ./state
@@ -96,8 +96,10 @@ while the previous working output continues serving.
 | `remove NAME` | Remove a configured provider |
 | `stop` | Remove owned components, retaining configuration and credentials |
 
-Installing software leaves current containers running. `start` applies new
-provider images; root `asys update` also handles shared Human services. Unchanged
+Installing software leaves current containers running. Apply a new release with
+root `asys update`, which also handles shared Human services and drains active
+runs first when the inference format changes; `start` alone replaces providers
+without that coordination. Unchanged
 providers retain containers. Switching an endpoint closes streams whose concrete
 route changes; new connections resolve the new symbolic target.
 

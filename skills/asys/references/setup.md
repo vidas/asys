@@ -2,7 +2,7 @@
 
 ## Install
 
-The host needs Linux, Python 3.10+, a local Docker Engine and CLI, and separately
+The host needs Linux, Python 3.10+, a local Docker Engine 23+ with BuildKit, and separately
 installed dcomp 0.3.2+ with Machine API 2. Building inference needs Go 1.25+.
 The Human terminal installs pinned dependencies in a private environment;
 worker dependencies are built into images.
@@ -109,8 +109,11 @@ base images, then recovers the same workflow and job outcomes. See
 an existing run. New runs and cold checkpoint resume also rebuild environments.
 
 To refresh shared inference/Human services, source the selected `asys-env` and
-run `asys update` separately. It can replace shared services while workflow
-workers remain running; it does not upgrade those workers.
+run `asys update`. A compatible update replaces the services while runs keep
+going. When the inference format changes, it first drains the affected runs and
+then upgrades them onto the new release; see
+[workflow upgrades](operations.md#upgrade-a-running-workflow) for that sequence
+and `--force`. `asys version` then shows whether every service is current.
 
 The 0.2.0 installer removes specialized host launchers; use `asys-run` throughout.
 Existing 0.1.x `workers.json` command bindings and `agents/` instructions stay in

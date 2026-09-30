@@ -130,7 +130,7 @@ protocols: they wait for the proxy header, not an application byte.
 `connectOutput()` is a raw transport helper: the returned socket includes
 the proxy header and has no `origin` property. Custom adapters using it must
 consume the header according to the
-[connection-origin contract](../../docs/component-contract.md#connection-origin).
+[connection-origin contract](https://github.com/glguida/dcomp/blob/v0.3.2/docs/component-contract.md#connection-origin).
 Ordinary servers should use `outputConnections()` or `serveOutput()`.
 
 ## API summary

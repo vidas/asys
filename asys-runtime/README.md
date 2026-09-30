@@ -96,7 +96,7 @@ The [worker environments](../asys-workers/env) provide concrete examples.
 
 `workers.json` uses the job-type format below, with environment fields:
 `name` is required, `description` is optional text, and `egress` is an optional
-boolean, defaulting to false. `asys-bpmn` and `asys-run` use `egress` to configure the
+boolean, defaulting to false. `asys-run` uses `egress` to configure the
 worker container's outbound network access. The runtime itself inherits the
 network of the process or container in which it runs. Names use the same syntax
 as job types. Executable paths containing `/` resolve against the definition

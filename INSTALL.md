@@ -46,9 +46,10 @@ way, with a notice to update it.
 asys version
 ```
 
-It shows the installed release, the selected state, and which build each running
-shared service uses, with a warning for anything outdated and for another
-`asys-inference` earlier on PATH. A release changes `VERSION` and
+It shows the installed release and the health of its images, the selected state,
+and which build each running shared service uses, with a warning for anything
+outdated, for an update still in progress, and for another `asys-inference`
+earlier on PATH. A release changes `VERSION` and
 `CHANGELOG.md` only.
 
 ## Installed interface
@@ -192,7 +193,8 @@ for compatibility, launcher handover and interruption behavior.
 
 Install dcomp 0.3.2 or newer first. Finish active runs: 0.2.0 launchers predate
 upgrade handover, and after the Pi update their workers find no compatible
-models. Then build as your own user, install with the original prefix and
+models. `asys update` lists such workflows and stops; `--force` updates anyway
+and they fail. Then build as your own user, install with the original prefix and
 update each state:
 
 ```sh

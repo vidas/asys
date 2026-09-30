@@ -135,7 +135,7 @@ Publish replies before advancing cursors; fetch current task state before acting
 on attention. The service streams existing and newly available questions.
 
 Handler state records the selected component, request, unresolved claim and
-answer. `asys update` refreshes owned shared services with current images;
+answer. `asys update` refreshes owned shared services with the installed release's images;
 private services are excluded. Replacement interrupts unanswered RPCs, so finish
 active Human decisions before applying a service update.
 

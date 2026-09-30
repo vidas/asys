@@ -96,7 +96,7 @@ test:
 help:
 	@printf '%s\n' \
 	  'make build         Build host commands and container images' \
-	  'make install       Build and install under PREFIX (default: $$HOME/.local)' \
+	  'make install       Install what make built under PREFIX (default: $$HOME/.local)' \
 	  'make install-host  Install core commands, agents, designs and both skills (no Docker needed)' \
 	  'make test-deps     Install Node and TUI dependencies for development tests' \
 	  'make test          Run Go, Python and Node tests (after test-deps)' \

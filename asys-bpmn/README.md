@@ -7,6 +7,7 @@ recovery. Launch every workflow through the shared `asys-run` command:
 ```sh
 asys-run ./env/development ./workflow.bpmn --input request.md --workspace ./project
 asys-run --resume RUN
+asys-run --upgrade RUN
 asys status RUN
 asys top RUN
 asys dashboard
@@ -46,7 +47,9 @@ express acceptance, revision and stopping explicitly.
 and retries interrupted or failed work in fresh jobs. It retains the workspace,
 completed results and execution evidence. Do not supply a new workflow,
 environment, workspace or model during resume. Checkpoint engine compatibility
-is checked before recovery. Resume is not a general migration between versions.
+is checked before recovery. Resume is not a general migration between versions;
+`asys-run --upgrade RUN` moves a running workflow onto newly installed code. See
+[workflow upgrades](../skills/asys/references/operations.md#upgrade-a-running-workflow).
 
 Workflow checkpoints and their events commit together in SQLite WAL mode with
 `synchronous=FULL`. A dedicated writer thread keeps durable disk writes off the

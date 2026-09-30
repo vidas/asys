@@ -37,7 +37,7 @@ a workflow may omit it if its tasks do not use the `request` variable.
 | `--human` | Workflow terminal with a private Human service; resume/upgrade can attach its saved private service |
 | `--system NAME` | Dcomp namespace; default `asys` |
 | `--dcomp-state-root DIRECTORY` | Dcomp state; default `DCOMP_STATE_ROOT` or dcomp default |
-| `--runtime-root DIRECTORY` | Dcomp proxy/socket directory; default chosen by dcomp |
+| `--runtime-root DIRECTORY` | Dcomp proxy/socket directory; default `DCOMP_RUNTIME_ROOT` or the dcomp state directory/run |
 | `-L INPUT=TARGET`, `--link INPUT=TARGET` | Repeatable input connection: `COMPONENT.OUTPUT`, `@GLOBAL`, or `-` |
 
 Resume and upgrade restore saved configuration and accept only `--root` and
@@ -52,7 +52,8 @@ Stdin cannot supply both `--input -` and interactive `--human` answers.
 
 ```text
 asys init DIRECTORY [--dcomp DIRECTORY] [--group GROUP]
-asys update [--root DIRECTORY]
+asys update [--force] [--root DIRECTORY]
+asys version [--root DIRECTORY]
 asys system-model set simple MODEL [--root DIRECTORY]
 asys system-model list [--json] [--root DIRECTORY]
 asys ps [--json] [--root DIRECTORY]
