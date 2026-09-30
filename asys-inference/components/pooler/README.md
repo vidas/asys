@@ -80,7 +80,7 @@ npm test
 From the parent components directory:
 
 ```sh
-docker build -t cyclo-pooler:dev -f pooler/Dockerfile .
+docker build -t cyclo-pooler -f pooler/Dockerfile .
 ```
 
 The image runs as UID/GID 1000. Asys mounts its private host channel and

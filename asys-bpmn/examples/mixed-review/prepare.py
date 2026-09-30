@@ -21,7 +21,7 @@ def prepare(destination, model=None):
     shutil.copytree(route / 'worlds', environment / 'worlds')
     (environment / 'programs').mkdir(exist_ok=True)
     shutil.copyfile(Path(__file__).with_name('compare.py'), environment / 'programs/compare.py')
-    (environment / 'component.dcomp').write_text('docker asys-env-mixed-review:dev\ninput cyclo.provider.v1.Provider inference\ninput asys.human.v1.Human human\n')
+    (environment / 'component.dcomp').write_text('docker asys-env-mixed-review\ninput cyclo.provider.v1.Provider inference\ninput asys.human.v1.Human human\n')
     selected = {'model': model} if model else {}
     definitions = {
         'single': {'kind': 'agent', 'config': {'agent': 'general', 'maxSteps': 12, **selected}},

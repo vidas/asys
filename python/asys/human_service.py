@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import time
 
+from asys_runtime import release
 from asys_runtime.files import write_json
 from asys_runtime.permissions import mkdir, open_file, shared
 
@@ -13,6 +14,17 @@ from .lifecycle import ComponentHost, LaunchError
 from .state import state_root
 
 SERVICE = 'asys.human.v1.Human'
+
+
+def human_image(inspect):
+    """Return the Human image (tag, ID): an explicit override, else the installed release's."""
+    override = os.environ.get('ASYS_HUMAN_INTERFACE_IMAGE')
+    if override:
+        return override, inspect(override)
+    try:
+        return release.image('asys-human-interface', inspect=inspect)
+    except release.ReleaseError as error:
+        raise LaunchError(f'Human image is unavailable: {error}') from error
 
 
 class SharedHumanService(ComponentHost):
@@ -63,8 +75,7 @@ class SharedHumanService(ComponentHost):
                 if component and not previous:
                     raise LaunchError(f'Component {name} already exists without managed Human service state')
 
-            image_ref = previous.get('image_ref') or os.environ.get('ASYS_HUMAN_INTERFACE_IMAGE') or 'asys-human-interface:dev'
-            image = self.command(['docker', 'image', 'inspect', '--format', '{{.Id}}', image_ref]).strip()
+            image_ref, image = human_image(self.image_id)
             runtime = self.directory / 'runtime'
             definition = self.directory / 'component'
             mkdir(runtime, exist_ok=True)

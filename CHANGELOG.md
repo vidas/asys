@@ -2,6 +2,21 @@
 
 ## 0.2.1
 
+- Give every build an identity. `VERSION` names the release; images are tagged
+  only with a build ID such as `0.2.1-015b3d3` and recorded in `release.json`,
+  which installation copies. Installed commands take the workflow engine, Human
+  service and environment base images from that record, never from a tag, so
+  building another checkout no longer changes an installation. The `:dev` tag
+  is gone.
+- Name asys base images without a tag (`FROM asys-workers`); asys resolves them
+  to the installed release. Existing `FROM asys-workers:dev` environments build
+  unchanged and print a notice to update the line.
+- Add `asys version` to show the installed release, the selected state, and the
+  build each running shared service uses, with warnings for outdated services
+  and for another `asys-inference` earlier on PATH.
+- Split building from installing: `make` builds, `make install` only copies, so
+  `sudo make install` no longer leaves root-owned files in the checkout.
+  Docker Engine 23+ with BuildKit is required.
 - Update Pi to 0.99.1 for current models and providers, including GPT-6.
   Provider payloads now carry Pi's normalized transcript, and the inference
   format becomes `pi-ai@0.99.1`: update shared inference and upgrade active runs

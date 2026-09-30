@@ -1,5 +1,7 @@
 .DEFAULT_GOAL := build
 
+include build.mk
+
 PREFIX ?= $(HOME)/.local
 DESTDIR ?=
 PYTHON ?= python3
@@ -20,7 +22,7 @@ host:
 	@set -e; for name in $(HOST_TOOLS); do install -D -m 0755 "tools/$$name" "bin/$$name"; done
 	@set -e; for name in $(REMOVED_HOST_TOOLS); do rm -f "bin/$$name" "$$name/bin/$$name"; done
 
-install-host: host install-skills install-designs
+install-host: install-skills install-designs
 	@set -e; for name in $(REMOVED_HOST_TOOLS); do rm -f "$(DESTDIR)$(PREFIX)/bin/$$name"; done
 	@set -e; for name in $(REMOVED_HOST_MODULES); do \
 		rm -f "$(DESTDIR)$(PREFIX)/share/asys/python/asys/$$name.py" \
@@ -31,7 +33,7 @@ install-host: host install-skills install-designs
 	      "$(DESTDIR)$(PREFIX)/share/asys/python/asys_swarm/world_process.pyc" \
 	      "$(DESTDIR)$(PREFIX)/share/asys/python/asys_swarm/__pycache__/world_process."*.pyc
 	rm -rf -- "$(DESTDIR)$(PREFIX)/share/asys-swarm" "$(DESTDIR)$(PREFIX)/share/asys-bpmn"
-	@set -e; for name in $(HOST_TOOLS); do install -D -m 0755 "bin/$$name" "$(DESTDIR)$(PREFIX)/bin/$$name"; done
+	@set -e; for name in $(HOST_TOOLS); do install -D -m 0755 "tools/$$name" "$(DESTDIR)$(PREFIX)/bin/$$name"; done
 	install -d "$(DESTDIR)$(PREFIX)/share/asys/python/asys"
 	install -m 0644 python/asys/*.py "$(DESTDIR)$(PREFIX)/share/asys/python/asys/"
 	install -d "$(DESTDIR)$(PREFIX)/share/asys/python/asys/dashboard_assets"
@@ -43,6 +45,8 @@ install-host: host install-skills install-designs
 	install -m 0644 asys-runtime/asys_runtime/*.py "$(DESTDIR)$(PREFIX)/share/asys/python/asys_runtime/"
 	install -m 0644 LICENSE "$(DESTDIR)$(PREFIX)/share/asys/"
 	install -m 0644 asys-runtime/LICENSE.multiagent "$(DESTDIR)$(PREFIX)/share/asys/"
+	@if test -f release.json; then install -m 0644 release.json "$(DESTDIR)$(PREFIX)/share/asys/"; \
+	else echo "warning: no release.json; installed commands need images from make build" >&2; fi
 	@if test -d asys-workers/asys_swarm; then \
 		install -d "$(DESTDIR)$(PREFIX)/share/asys/python/asys_swarm"; \
 		install -m 0644 asys-workers/asys_swarm/*.py "$(DESTDIR)$(PREFIX)/share/asys/python/asys_swarm/"; \
@@ -70,7 +74,9 @@ build: host
 	$(MAKE) -C asys-bpmn build
 	$(MAKE) -C asys-human-interface build
 
+# Installation copies what make built, so sudo never writes into the checkout.
 install:
+	@test -f release.json || { echo "Nothing is built; run make first, then make install." >&2; exit 1; }
 	$(MAKE) -C asys-inference install
 	$(MAKE) -C asys-bpmn install
 	$(MAKE) -C asys-human-interface install

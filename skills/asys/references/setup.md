@@ -7,10 +7,13 @@ installed dcomp 0.3.2+ with Machine API 2. Building inference needs Go 1.25+.
 The Human terminal installs pinned dependencies in a private environment;
 worker dependencies are built into images.
 
-From the source checkout, run `make install`. The prefix defaults to `~/.local`;
-put its `bin` on PATH. `PREFIX=/path` selects another installation; `DESTDIR`
-supports staging. `make install-host` installs core commands, Python modules,
-the default design, world resources and skills without building images.
+From the source checkout, run `make` as your own user, then `make install`
+(`sudo make install PREFIX=/usr/local` for a system prefix). Installation only
+copies what `make` built. The prefix defaults to `~/.local`; put its `bin` on
+PATH. `DESTDIR` supports staging. `make install-host` installs core commands,
+Python modules, the default design, world resources, skills and the release
+record, without inference or the Human terminal. `asys version` shows the
+installed release and whether running services use it.
 
 ```sh
 asys skill
@@ -83,11 +86,12 @@ or running state.
 
 ## Update
 
-`make build` builds commands and images. `make install` builds and installs all
-host tools; `make install-host` installs core host files and skills without
-building images or installing the inference/Human host tools. Keep the original
-installation prefix. These actions leave existing containers on their original
-images.
+`make` builds commands and images under a new build ID and records them in
+`release.json`. `make install` installs everything that was built;
+`make install-host` installs core host files, skills and the release record
+without the inference/Human host tools. Keep the original installation prefix.
+These actions leave existing containers on their original images; `asys version`
+lists what still runs an older build.
 
 For workflow/runtime changes with unchanged shared services:
 

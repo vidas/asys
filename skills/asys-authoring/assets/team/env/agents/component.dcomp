@@ -1,3 +1,3 @@
-docker asys-skill-team-agents:dev
+docker asys-skill-team-agents
 input cyclo.provider.v1.Provider inference
 input asys.human.v1.Human human

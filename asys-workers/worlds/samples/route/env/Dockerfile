@@ -1,2 +1,2 @@
-FROM asys-workers:dev
+FROM asys-workers
 COPY . /opt/asys/environment

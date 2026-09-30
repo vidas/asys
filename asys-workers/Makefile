@@ -1,6 +1,8 @@
+include ../build.mk
+
 .PHONY: build
 build:
-	docker build -f ../asys-runtime/Dockerfile -t asys-runtime:dev ..
-	docker build -f worlds/Dockerfile -t asys-worlds:dev ..
-	docker build -f Dockerfile -t asys-workers:dev ..
-	docker build -t asys-env-default:dev env/default
+	$(BUILD_IMAGE) asys-runtime .. ../asys-runtime/Dockerfile
+	$(BUILD_IMAGE) asys-worlds .. worlds/Dockerfile
+	$(BUILD_IMAGE) asys-workers .. Dockerfile
+	$(BUILD_IMAGE) asys-env-default env/default

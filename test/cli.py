@@ -1,15 +1,20 @@
 import contextlib
 import io
+import json
 import os
 import runpy
 from pathlib import Path
+import shutil
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path[:0] = [str(ROOT / 'python'), str(ROOT / 'asys-runtime')]
+sys.path[:0] = [str(ROOT / 'python'), str(ROOT / 'asys-runtime'), str(ROOT / 'test-support')]
+from asys import version as version_module
 from asys.cli import arguments
+from release_fixture import use_fixture_release
 
 
 class ArgumentTests(unittest.TestCase):
@@ -108,6 +113,32 @@ class ArgumentTests(unittest.TestCase):
                 arguments(argv)
             self.assertEqual(exited.exception.code, 0)
             self.assertTrue(output.getvalue().startswith(usage), output.getvalue())
+
+
+class VersionTests(unittest.TestCase):
+    def test_version_names_the_release_and_flags_services_on_other_builds(self):
+        state = Path(tempfile.mkdtemp(prefix='asys-version-'))
+        self.addCleanup(shutil.rmtree, state)
+        use_fixture_release(self, state, 'sha256:current')
+        (state / 'inference').mkdir()
+        (state / 'inference/machine.json').write_text(json.dumps({'revision': 2, 'applied_revision': 2, 'applied': {
+            'components': [{'name': 'asys-inference-gateway', 'component': {'image': 'sha256:gateway'}}]}}))
+        (state / 'human/shared').mkdir(parents=True)
+        (state / 'human/shared/service.json').write_text(json.dumps({'component': 'asys-human', 'image': 'sha256:current'}))
+        builds = {'sha256:gateway': 'older-build', 'sha256:current': 'fixture'}
+        output = io.StringIO()
+        with patch.object(version_module.release, 'inspect_image', return_value='sha256:current'), \
+                patch.object(version_module, 'image_build', side_effect=builds.get), \
+                patch.object(version_module.shutil, 'which', return_value=None), \
+                contextlib.redirect_stdout(output):
+            args = arguments(['version', '--root', str(state)])
+            args.handler(args)
+        text = output.getvalue()
+        self.assertIn('asys 0.0.0 (build fixture)', text)
+        self.assertRegex(text, r'asys-inference-gateway\s+older-build\s+outdated')
+        self.assertRegex(text, r'asys-human\s+fixture\s+current')
+        self.assertIn('warning: asys-inference-gateway was not built by release fixture; run asys update', text)
+        self.assertNotIn('warning: asys-human', text)
 
 
 if __name__ == '__main__':

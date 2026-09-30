@@ -9,7 +9,8 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path[:0] = [str(ROOT / "python"), str(ROOT.parent / "python"), str(ROOT.parent / "asys-runtime")]
+sys.path[:0] = [str(ROOT / "python"), str(ROOT.parent / "python"), str(ROOT.parent / "asys-runtime"), str(ROOT.parent / "test-support")]
+from release_fixture import use_fixture_release  # noqa: E402
 from asys_human.channel import Channel, RPCError
 from asys_human.launcher import Launcher, arguments
 from asys.human_service import SharedHumanService
@@ -99,6 +100,7 @@ class PrivateRecoveryTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory(prefix='human-recovery-')
         self.addCleanup(temporary.cleanup)
         self.directory = Path(temporary.name)
+        use_fixture_release(self, self.directory, 'sha256:fixture')
         self.runtime = self.directory / 'runtime'
         self.runtime.mkdir()
         self.args = arguments(['--private', '--name', 'run-human', '--claimant', 'alice'])

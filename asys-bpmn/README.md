@@ -78,8 +78,8 @@ separate public workflow host executable.
 
 ## Development
 
-`make build` builds the workflow and worker images. `make install` installs the
-shared host commands. `npm test` covers engine behavior and host integration
+`make build` builds the workflow and worker images. `make install` then installs
+the shared host commands. `npm test` covers engine behavior and host integration
 fixtures; `tools/integration-test` checks real dcomp containers, programs, Pi
 adapter fixtures, Human protocol and launcher recovery without paid model calls.
 `make test-upstream-drift` checks newer upstream engine assumptions separately.

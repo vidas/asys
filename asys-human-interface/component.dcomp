@@ -1,2 +1,2 @@
-docker asys-human-interface:dev
+docker asys-human-interface
 output asys.human.v1.Human human

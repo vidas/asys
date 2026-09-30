@@ -3,7 +3,7 @@
 ## Requirements
 
 Use Linux, GNU Make, Python 3.10+, Go 1.25+ for the inference build, and a local
-Docker Engine accessible to the invoking user. Install dcomp 0.3.2+ separately;
+Docker Engine 23+ with BuildKit accessible to the invoking user. Install dcomp 0.3.2+ separately;
 `dcomp` and `dcomp-proxy` must be on PATH (or use their documented binary overrides).
 Host Node is unnecessary for ordinary execution; container builds install worker
 dependencies. Development tests need Node 22.19+, npm and Python jsonschema.
@@ -16,14 +16,40 @@ the fix requires replacing the running proxy; `asys update` alone leaves it runn
 ```sh
 dcomp version
 command -v dcomp-proxy
+make
 make install
 ```
 
-Run make from this repository. The default prefix is `~/.local`; add its bin to
-PATH. Select another writable installation with `make install PREFIX=/opt/asys`.
-`DESTDIR` stages host files. Installation builds images and installs core,
-inference and Human host commands. It does not initialize state or authenticate
-an inference account.
+Run make from this repository as your own user: `make` builds the commands and
+images, and `make install` only copies what was built, so a system prefix is
+`make` followed by `sudo make install PREFIX=/usr/local` and root never writes
+into the checkout. The default prefix is `~/.local`; add its bin to PATH.
+`DESTDIR` stages host files. Installation does not initialize state or
+authenticate an inference account.
+
+## Releases and images
+
+`VERSION` names the release. Each build has an ID made from it and the commit,
+such as `0.2.1-015b3d3`; a tree with uncommitted changes adds `-dirty` and a
+timestamp. Images are tagged only with that ID, and `make` records each one in
+`release.json`, which `make install` copies to `PREFIX/share/asys`. Installed
+commands take their images from that record, never from a tag name, so building
+another checkout does not change what an installation runs.
+
+Dockerfiles name their asys base without a tag: `FROM asys-workers`,
+`FROM asys-worlds` or `FROM asys-runtime`. asys resolves those names to the
+installed release when it builds an environment or world; a plain `docker build`
+reports them missing. The former `FROM asys-workers:dev` still resolves the same
+way, with a notice to update it.
+
+```sh
+asys version
+```
+
+It shows the installed release, the selected state, and which build each running
+shared service uses, with a warning for anything outdated and for another
+`asys-inference` earlier on PATH. A release changes `VERSION` and
+`CHANGELOG.md` only.
 
 ## Installed interface
 
@@ -36,12 +62,11 @@ an inference account.
 | `asys-inference` | Configure and operate the provider network |
 | `asys-human-prompt` | Attach a terminal to human questions |
 
-`make build` builds commands/images without installing. `make install-host`
-installs the core commands, Python modules, system prompts, world resources,
-default dashboard design and both skills without Docker. It does not build
-execution images or install inference and the Human terminal. Component targets
-remain available: `make -C asys-inference install` and
-`make -C asys-human-interface install`.
+`make install-host` installs the core commands, Python modules, system prompts,
+world resources, default dashboard design, both skills and the release record,
+without inference or the Human terminal. Component targets remain available:
+`make -C asys-inference install` and `make -C asys-human-interface install`.
+Every install target copies the result of an earlier `make`.
 
 Bundled guides are installed under `PREFIX/share/asys/skills/{asys,asys-authoring}`.
 The default visual package is `PREFIX/share/asys/designs/default`.
@@ -140,9 +165,9 @@ images. Choose the action for the components being updated:
 
 | Action | Effect |
 | --- | --- |
-| `make build` | Build host commands and execution images without installing host files |
-| `make install` | Build images and install core, inference and Human host tools |
-| `make install-host` | Install core host files and skills without building images or installing inference/Human host tools |
+| `make` | Build host commands and execution images under a new build ID |
+| `make install` | Install what `make` built: core, inference and Human host tools and the release record |
+| `make install-host` | Install core host files, skills and the release record, without inference/Human host tools |
 | `asys update` | Refresh shared inference and Human services from installed code/images |
 | `asys-run --upgrade RUN` | Drain and replace one workflow's owned execution components |
 
@@ -167,17 +192,23 @@ for compatibility, launcher handover and interruption behavior.
 
 Install dcomp 0.3.2 or newer first. Finish active runs: 0.2.0 launchers predate
 upgrade handover, and after the Pi update their workers find no compatible
-models. Then install with the original prefix and update each state:
+models. Then build as your own user, install with the original prefix and
+update each state:
 
 ```sh
-make install
+make
+make install                      # or: sudo make install PREFIX=/usr/local
 source /path/to/state/asys-env
 asys update
-asys-inference models
+asys version
 ```
 
-Logins are kept. Runs started under 0.2.1 can later move to new execution code
-with `asys-run --upgrade RUN`.
+Logins are kept. `asys version` should report every service as current. An
+earlier `make install` run with sudo may have left root-owned `bin/` directories
+in the checkout; return them to your user before building. Existing
+`FROM asys-workers:dev` environments keep building and print a notice to drop
+the tag. Runs started under 0.2.1 can later move to new execution code with
+`asys-run --upgrade RUN`.
 
 ## Upgrade to 0.2.0
 

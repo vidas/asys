@@ -15,7 +15,7 @@ async function checkout(t, extra = []) {
   t.after(() => rm(root, { recursive: true, force: true }));
   const project = join(root, 'checkout');
   await mkdir(project);
-  for (const path of ['Makefile', 'LICENSE', 'tools', 'python', 'skills', 'designs', 'asys-runtime/asys_runtime',
+  for (const path of ['Makefile', 'build.mk', 'VERSION', 'LICENSE', 'tools', 'python', 'skills', 'designs', 'asys-runtime/asys_runtime',
     'asys-runtime/LICENSE.multiagent', 'asys-workers/asys_swarm', 'asys-workers/worlds', ...extra]) {
     await cp(join(source, path), join(project, path), { recursive: true });
   }
@@ -24,8 +24,12 @@ async function checkout(t, extra = []) {
 
 test('core asys installs system agent resources and definitions without the source checkout', async t => {
   const { root, project, library } = await checkout(t);
+  const record = { version: '0.0.0', build: 'fixture', images: {} };
+  await writeFile(join(project, 'release.json'), JSON.stringify(record));
   await exec('make', ['--no-print-directory', '-C', project, 'install-host', 'PREFIX=/opt/asys', `DESTDIR=${root}/staged`]);
   await rm(project, { recursive: true });
+  // Installed commands take their images from the release this checkout built.
+  assert.deepEqual(JSON.parse(await readFile(join(root, 'staged/opt/asys/share/asys/release.json'), 'utf8')), record);
   const binary = join(root, 'staged/opt/asys/bin/asys');
   const { stdout } = await exec('python3', ['-I', '-S', binary, 'ps', '--json', '--root', join(root, 'absent')], { cwd: root });
   assert.deepEqual(JSON.parse(stdout), []);
@@ -228,6 +232,9 @@ test('upgrading removes obsolete host entrypoints and packages only from the sel
   }
   for (const relative of retained) assert.equal(await readFile(join(prefix, relative), 'utf8'), 'leave this file alone\n');
   await assert.rejects(stat(join(prefix, 'share/asys-swarm')), { code: 'ENOENT' });
+  // Installing never writes into the checkout; building removes stale entrypoints.
+  for (const name of removed) await stat(join(project, `bin/asys-${name}`));
+  await exec('make', ['--no-print-directory', '-C', project, 'host']);
   for (const name of removed) {
     await assert.rejects(stat(join(project, `bin/asys-${name}`)), { code: 'ENOENT' });
     await assert.rejects(stat(join(project, `asys-${name}/bin/asys-${name}`)), { code: 'ENOENT' });

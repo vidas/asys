@@ -16,7 +16,7 @@ test('the prompt host tool installs independently and runs without a checkout or
   const checkout = join(root, 'checkout');
   for (const path of ['asys-human-interface/Makefile', 'asys-human-interface/requirements-host.txt', 'asys-human-interface/tools', 'asys-human-interface/python',
     'asys-human-interface/.host-deps',
-    'asys-runtime/asys_runtime', 'asys-runtime/LICENSE.multiagent', 'LICENSE', 'Makefile', 'tools', 'python', 'skills', 'designs']) {
+    'asys-runtime/asys_runtime', 'asys-runtime/LICENSE.multiagent', 'LICENSE', 'Makefile', 'build.mk', 'VERSION', 'tools', 'python', 'skills', 'designs']) {
     await cp(join(source, path), join(checkout, path), { recursive: true, preserveTimestamps: true });
   }
   await exec('make', ['-C', join(checkout, 'asys-human-interface'), 'install-host', 'PREFIX=/opt/asys', `DESTDIR=${root}/staged`], {

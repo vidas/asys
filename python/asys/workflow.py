@@ -8,6 +8,7 @@ import signal
 import sys
 import time
 
+from asys_runtime import release
 from asys_runtime.channel import Reader, Writer, direction_root
 from asys_runtime.environment import Environment
 from asys_runtime.permissions import mkdir, shared
@@ -116,11 +117,16 @@ class Launcher(EnvironmentHost):
         self.start_components()
 
     def engine_image(self):
-        image = os.environ.get("ASYS_BPMN_IMAGE") or "asys-bpmn:dev"
+        image = os.environ.get("ASYS_BPMN_IMAGE")
+        if not image:
+            try:
+                return release.image("asys-bpmn", inspect=self.image_id)[1]
+            except release.ReleaseError as error:
+                raise LaunchError(f"Workflow image is unavailable: {error}") from error
         try:
-            return self.command(["docker", "image", "inspect", "--format", "{{.Id}}", image]).strip()
+            return self.image_id(image)
         except LaunchError as error:
-            raise LaunchError(f"Workflow image {image} is unavailable. Build the asys images with make -C asys-bpmn build.\n{error}") from error
+            raise LaunchError(f"Workflow image {image} is unavailable.\n{error}") from error
 
     def setup_resume(self):
         directory = Runs(state_root('runs', root=self.args.root)).select(self.args.run)

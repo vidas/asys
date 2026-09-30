@@ -151,8 +151,8 @@ the saved session for the next terminal to recover.
 
 ## Development
 
-`make install-host` installs the terminal and its pinned private Python
-dependencies. `make install` also builds the image. `npm test` covers protocol
+`make build` builds the image and the terminal's pinned private Python
+dependencies; `make install-host` then installs them. `npm test` covers protocol
 and presentation fixtures; `tools/integration-test` exercises real component
 and terminal behavior. The [Human prompt example](../asys-bpmn/examples/human-prompt/README.md)
 requires no inference provider.

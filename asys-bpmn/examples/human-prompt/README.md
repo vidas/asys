@@ -12,9 +12,8 @@ either command:
 dcomp --state-root "$PWD/.asys/dcomp" up system.dcomp
 ```
 
-The demo requires the `asys-workers:dev`, `asys-bpmn:dev`, and
-`asys-human-interface:dev` images. Build them with `make build` from the
-repository root if they are not already available. The launcher builds this
+The demo requires the workers, workflow and Human images. Build them with
+`make build` from the repository root if they are not already available. The launcher builds this
 example's small worker environment automatically.
 
 For one terminal, run `./run --human`. To use a shared handler, in the first terminal run:

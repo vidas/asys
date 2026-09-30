@@ -1,4 +1,4 @@
-FROM asys-runtime:dev
+FROM asys-runtime
 USER root
 WORKDIR /opt/asys
 COPY asys-inference/components/vendor/dcomp-component ./asys-inference/components/vendor/dcomp-component

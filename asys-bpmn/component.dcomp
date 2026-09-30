@@ -1,2 +1,2 @@
-docker asys-bpmn:dev
+docker asys-bpmn
 output asys.workflow.v1.Workflow workflow

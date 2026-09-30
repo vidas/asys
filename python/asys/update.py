@@ -8,9 +8,10 @@ import sys
 import time
 import os
 
+from asys_runtime import release
 from asys_runtime.channel import Reader, Writer, direction_root
 from asys_runtime.permissions import open_file
-from .human_service import SharedHumanService
+from .human_service import SharedHumanService, human_image
 
 
 def inference_command():
@@ -19,9 +20,8 @@ def inference_command():
 
 
 def refresh_human(directory, record):
-    image = record['image_ref']
-    inspected = subprocess.run(['docker', 'image', 'inspect', '--format', '{{.Id}}', image],
-                               check=True, capture_output=True, text=True).stdout.strip()
+    # The owning terminal replaces its component; this sends it the installed image.
+    _, inspected = human_image(release.inspect_image)
     if inspected == record['image']:
         print(f"Human service {record['component']} is current.", flush=True)
         return

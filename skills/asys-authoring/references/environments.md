@@ -34,7 +34,7 @@ of the environment definition unless they are intentionally reusable resources.
 ## Package dependencies
 
 ```dockerfile
-FROM asys-workers:dev
+FROM asys-workers
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends make gcc \
     && rm -rf /var/lib/apt/lists/*
@@ -42,13 +42,18 @@ COPY . /opt/asys/environment
 USER node
 ```
 
+Name the base without a tag. asys builds the environment on the installed
+release's `asys-workers` image, so the environment follows the installation; a
+plain `docker build` cannot resolve it. The former `FROM asys-workers:dev`
+resolves the same way, with a notice to update it.
+
 Retain the base entrypoint. The host runs components with the invoking UID/GID;
 installed programs must work for that identity. Build-time installation is the
 place for dependencies. An optional `tools.md` inventories available tools and
 versions for agent prompts; it neither installs tools nor registers extensions.
 
 ```text
-docker project-development:dev
+docker project-development
 input cyclo.provider.v1.Provider inference
 input asys.human.v1.Human human
 ```

@@ -12,6 +12,7 @@ from asys_runtime.files import timestamp, write_json
 from asys_runtime.permissions import mkdir, shared
 from .lifecycle import ComponentHost, LaunchError, CommandTimeout, Interrupted, RecoveryRequired
 from .human_service import ensure_human
+from .images import build_image
 from .config import system_models
 from .options import dcomp_options
 
@@ -166,14 +167,12 @@ class EnvironmentHost(ComponentHost):
 
     def build_environment(self, environment):
         self.say(f"Building environment {self.record['environment']} from {environment}")
-        image_file = self.directory / 'environment-image'
-        self.command(['docker', 'build', '--iidfile', str(image_file), str(environment)], timeout=900, cancellable=True)
-        return image_file.read_text().strip()
+        return build_image(self, environment, self.directory / 'environment-image')
 
     def environment_image(self, environment, image_ref):
         if (environment / 'Dockerfile').is_file():
             return self.build_environment(environment)
-        return self.command(['docker', 'image', 'inspect', '--format', '{{.Id}}', image_ref]).strip()
+        return self.image_id(image_ref)
 
     def execution_mounts(self):
         if not Path(self.record['workspace']).is_dir():

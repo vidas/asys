@@ -24,6 +24,8 @@ from asys.run import arguments
 from asys.workflow import Launcher
 from asys_runtime.channel import Reader, Writer, direction_root
 from asys_runtime.files import write_json
+sys.path.insert(0, str(ROOT / 'test-support'))
+from release_fixture import use_fixture_release
 
 NODE = os.environ.get('NODE') or shutil.which('node')
 OLD = 'sha256:' + '1' * 64
@@ -315,6 +317,7 @@ class UpgradeIntegration(unittest.TestCase):
     def fixture(self):
         self.assertIsNotNone(NODE, 'Node 22.19+ is required for actual BPMN integration tests')
         fixture = LocalComponents(self)
+        use_fixture_release(self, fixture.root, NEW)
         return fixture
 
     def upgrade_draining(self, *, failing=False, active_owner=False):

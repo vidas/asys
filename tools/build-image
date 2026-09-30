@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+"""Build one asys image for the current build ID and record it in release.json.
+
+Usage: build-image NAME CONTEXT [DOCKERFILE]
+
+The image is tagged NAME:$ASYS_BUILD and labelled with the version and build.
+Dockerfiles name their asys base images bare (FROM asys-runtime); those names
+resolve to the images this build already recorded.
+"""
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "asys-runtime"))
+from asys_runtime import release  # noqa: E402
+
+
+def main(name, context, dockerfile=None):
+    build = os.environ["ASYS_BUILD"]
+    version = (ROOT / "VERSION").read_text().strip()
+    path = ROOT / release.RELEASE_FILE
+    ref = f"{name}:{build}"
+    contexts = release.build_contexts(release.load(path)) if path.is_file() else []
+    command = ["docker", "build", "--tag", ref,
+               "--label", f"org.opencontainers.image.version={version}",
+               "--label", f"io.asys.build={build}", *contexts]
+    if dockerfile:
+        command += ["--file", dockerfile]
+    subprocess.run([*command, context], check=True)
+    release.record(path, name, ref, version=version, build=build)
+
+
+if __name__ == "__main__":
+    if not 3 <= len(sys.argv) <= 4:
+        sys.exit(__doc__.strip().splitlines()[2])
+    try:
+        main(*sys.argv[1:])
+    except (release.ReleaseError, subprocess.CalledProcessError) as error:
+        sys.exit(f"build-image: {error}")

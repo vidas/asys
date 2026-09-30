@@ -64,6 +64,7 @@ and check execution with the bundled deterministic workflow. No model account is
 needed:
 
 ```sh
+make
 make install
 asys init ./state
 source ./state/asys-env
@@ -126,6 +127,7 @@ A team shares one installation, one inference gateway with its signed-in
 accounts, and one set of run records through a Unix group:
 
 ```sh
+make
 sudo make install PREFIX=/usr/local
 sudo groupadd --force asys && sudo usermod -aG asys alice
 sudo install -d -g asys -m 2770 /srv/asys

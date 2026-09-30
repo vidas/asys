@@ -11,6 +11,7 @@ from .runs import logs, status
 from .skill import skill
 from .state import initialize, state_root
 from .update import update
+from .version import version
 from .options import ROOT_HELP
 
 
@@ -82,6 +83,9 @@ def arguments(argv):
 
     add_command(commands, 'update', update,
                 'Refresh running shared services from the installed images', parents=[state])
+
+    add_command(commands, 'version', version,
+                'Show the installed release and the release each running service uses', parents=[state])
 
     guide = add_command(commands, 'skill', skill,
                         'Locate or export the operating and authoring skills', validate=validate_skill)

@@ -18,7 +18,7 @@ class PackageTests(unittest.TestCase):
         (self.package / 'component').mkdir()
         (self.package / 'world.json').write_text(json.dumps({
             'version': 1, 'component': 'component/component.dcomp', 'view': 'view.mjs'}))
-        (self.package / 'component/component.dcomp').write_text('docker test-world:dev\n')
+        (self.package / 'component/component.dcomp').write_text('docker test-world\n')
         (self.package / 'view.mjs').write_text('export function mount() {}\n')
 
     def test_package_resolves_component_and_esm_view_without_imports(self):
@@ -63,7 +63,7 @@ class PackageTests(unittest.TestCase):
                                        'view': 'component/view.mjs'}))
         with self.assertRaisesRegex(ValueError, 'outside the component'):
             resolve_package(self.root, 'worlds/test')
-        (self.package / 'component.dcomp').write_text('docker test-world:dev\n')
+        (self.package / 'component.dcomp').write_text('docker test-world\n')
         manifest.write_text(json.dumps({'version': 1, 'component': 'component.dcomp', 'view': 'view.mjs'}))
         with self.assertRaisesRegex(ValueError, 'dedicated viewer'):
             resolve_package(self.root, 'worlds/test')

@@ -203,8 +203,8 @@ def ensure_environment(environment):
     name = re.sub(r'[^A-Za-z0-9._-]', '-', root.name).strip('._-')[:128] or 'environment'
     image_name = re.sub(r'[^a-z0-9-]', '-', name.lower()).strip('-') or 'environment'
     defaults = {
-        'Dockerfile': 'FROM asys-workers:dev\nCOPY . /opt/asys/environment\n',
-        'component.dcomp': f'docker asys-env-{image_name}:dev\ninput cyclo.provider.v1.Provider inference\ninput asys.human.v1.Human human\n',
+        'Dockerfile': 'FROM asys-workers\nCOPY . /opt/asys/environment\n',
+        'component.dcomp': f'docker asys-env-{image_name}\ninput cyclo.provider.v1.Provider inference\ninput asys.human.v1.Human human\n',
         'workers.json': json.dumps({'version': 1, 'name': name, 'types': {
             'program': {'command': ['/opt/asys/asys-workers/tools/asys-program']}}}, indent=2) + '\n',
     }

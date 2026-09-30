@@ -18,6 +18,8 @@ from asys.worker_definitions import definition_command
 from asys.world_host import prepare_worlds, snapshot_view, start_worlds
 from asys.world_packages import resolve_package
 from asys_runtime.files import write_json
+sys.path.insert(0, str(ROOT / 'test-support'))
+from release_fixture import use_fixture_release
 
 
 def swarm(reference):
@@ -85,6 +87,7 @@ class WorldHostTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
+        use_fixture_release(self, self.root, 'sha256:fixture-world')
         self.environment = self.root / 'env'
         (self.environment / 'workers').mkdir(parents=True)
         self.package('worlds/search')
@@ -217,7 +220,7 @@ class WorldHostTests(unittest.TestCase):
         builds = [call for call in self.host.calls if call[:2] == ['docker', 'build']]
         self.assertEqual(len(builds), 1)
         self.assertEqual(builds[0][-1], str(self.environment / 'worlds/search/component'))
-        self.assertIn('/world-components/', builds[0][3])
+        self.assertIn('/world-components/', builds[0][builds[0].index('--iidfile') + 1])
         self.assertFalse((self.host.directory / 'environment-image').exists())
 
     def test_resume_reuses_binding_and_data_and_requires_new_readiness(self):

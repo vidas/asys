@@ -60,7 +60,7 @@ def _swarm_assets(root, name, definition, config, remember):
     # so distinct case-sensitive worker names cannot silently share an image.
     import hashlib
     tag = hashlib.sha256(name.encode()).hexdigest()[:20]
-    files[f'{package}/component/component.dcomp'] = f'docker asys-world-{tag}:dev\n'
+    files[f'{package}/component/component.dcomp'] = f'docker asys-world-{tag}\n'
     for relative in files:
         if scoped_path(root, relative).exists():
             raise ValueError(f'Swarm asset already exists: {relative}')

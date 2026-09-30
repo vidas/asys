@@ -1,3 +1,3 @@
-docker asys-env-default:dev
+docker asys-env-default
 input cyclo.provider.v1.Provider inference
 input asys.human.v1.Human human

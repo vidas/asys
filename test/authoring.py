@@ -344,7 +344,7 @@ class AuthoringTests(unittest.TestCase):
         self.invoke('workers', 'add', 'goal', 'build')
         before = (self.environment / 'workers.json').read_bytes()
         source = self.directory / 'Dockerfile.custom'
-        source.write_text('FROM asys-workers:dev\nCOPY . /opt/asys/environment\nRUN true\n')
+        source.write_text('FROM asys-workers\nCOPY . /opt/asys/environment\nRUN true\n')
         self.invoke('environment', 'dockerfile', source)
         self.assertEqual((self.environment / 'Dockerfile').read_bytes(), source.read_bytes())
         self.assertEqual((self.environment / 'workers.json').read_bytes(), before)
@@ -354,7 +354,7 @@ class AuthoringTests(unittest.TestCase):
         self.assertIn('RUN true', (self.environment / 'Dockerfile').read_text())
 
     def test_environment_edit_scopes_files_and_validates_runtime_json(self):
-        self.env['EDIT_TEXT'] = 'FROM asys-workers:dev\nCOPY . /opt/asys/environment\n'
+        self.env['EDIT_TEXT'] = 'FROM asys-workers\nCOPY . /opt/asys/environment\n'
         self.invoke('environment', 'edit')
         before = (self.environment / 'workers.json').read_bytes()
         self.env['EDIT_TEXT'] = '{"version":1,"name":"test","types":{}}'

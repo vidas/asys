@@ -15,7 +15,7 @@ import uuid
 from asys.lifecycle import ComponentHost, LaunchError, Interrupted
 from asys.state import state_root
 from asys.options import ROOT_HELP, dcomp_options
-from asys.human_service import SharedHumanService, ensure_human
+from asys.human_service import SharedHumanService, ensure_human, human_image
 from asys_runtime.files import write_json
 from asys_runtime.permissions import mkdir, shared, open_file
 from asys_runtime.channel import Reader, Writer, direction_root
@@ -124,11 +124,7 @@ class Launcher(ComponentHost):
         document = self.view()
         if document.get("operation"):
             raise LaunchError(f"dcomp system {self.args.system} has a pending operation")
-        self.image_ref = os.environ.get("ASYS_HUMAN_INTERFACE_IMAGE") or "asys-human-interface:dev"
-        try:
-            self.image = self.command(["docker", "image", "inspect", "--format", "{{.Id}}", self.image_ref]).strip()
-        except LaunchError as error:
-            raise LaunchError(f"Build the human component with make -C asys-human-interface build.\n{error}") from error
+        self.image_ref, self.image = human_image(self.image_id)
         if any(c["name"] == self.name for c in document["components"]):
             raise LaunchError(f"Component {self.name} already exists")
         self.attach()
@@ -207,7 +203,7 @@ class Launcher(ComponentHost):
         self.control_output = Writer(direction_root(directory, 'control', 'out'))
         state = directory / 'service.json'
         service = json.loads(state.read_text()) if state.is_file() else {}
-        self.image_ref = saved.get('image_ref') or service.get('image_ref', 'asys-human-interface:dev')
+        self.image_ref = saved.get('image_ref') or service.get('image_ref')
         self.image = component['image_id']
         self.active = saved.get('active')
         if self.active:

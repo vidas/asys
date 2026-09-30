@@ -48,7 +48,8 @@ func NewRuntime(store Store, config Config, report io.Writer) (*Runtime, error) 
 		Report: func(message string) { fmt.Fprintln(report, message) }}
 	runtime := &Runtime{Store: store, Controller: controller, Report: report}
 	runtime.Build = func(ctx context.Context, source, buildContext, tag string) error {
-		command := exec.CommandContext(ctx, "docker", "build", "--tag", tag, "--file", filepath.Join(source, "Dockerfile"), buildContext)
+		command := exec.CommandContext(ctx, "docker", "build", "--tag", tag, "--file", filepath.Join(source, "Dockerfile"),
+			"--label", "org.opencontainers.image.version="+Version, "--label", "io.asys.build="+Build, buildContext)
 		// Force the same local engine as the dcomp library, ignoring Docker contexts.
 		host := os.Getenv("DOCKER_HOST")
 		if host == "" {

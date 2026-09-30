@@ -19,7 +19,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT.parent / "python"), str(ROOT.parent / "asys-runtime")]
-from asys_runtime import Queue
+from asys_runtime import Queue, release
 
 
 class HumanQueue(Queue):
@@ -68,7 +68,7 @@ def main():
         def add_worker(name):
             definition = temp / name
             definition.mkdir()
-            worker_image = os.environ.get("ASYS_WORKERS_IMAGE", "asys-workers:dev")
+            worker_image = os.environ.get("ASYS_WORKERS_IMAGE") or release.image("asys-workers")[0]
             (definition / "component.dcomp").write_text(f"docker {worker_image}\ninput asys.human.v1.Human human\n")
             (definition / "workers.json").write_text(json.dumps({"version": 1, "name": name,
                 "types": {"human": {"command": ["/opt/asys/asys-workers/tools/asys-human"]}}}))
@@ -93,7 +93,7 @@ def main():
                 process = subprocess.Popen([sys.executable, str(ROOT / "tools/asys-human-prompt"), "--system", system,
                     "--dcomp-state-root", str(temp / "dcomp"), "--root", str(current_handler_root.parent), "--claimant", "alice", *extra],
                     stdin=subprocess.PIPE, stdout=stream, stderr=stream, text=True,
-                    env={**os.environ, 'ASYS_HUMAN_INTERFACE_IMAGE': human_image})
+                    env=os.environ)
             processes.append(process)
             def contains(needle):
                 if process.poll() is not None:
@@ -110,7 +110,17 @@ def main():
             return json.loads(row[0])['state'] if row else {'status': 'pending'}
 
         try:
-            run(['docker'], 'tag', 'asys-human-interface:dev', human_image)
+            # The test installs its own Human image through a private release,
+            # exactly as make install records one.
+            installed = release.load()
+            run(['docker'], 'tag', release.image('asys-human-interface', installed)[0], human_image)
+            test_release = temp / 'release.json'
+            shutil.copyfile(release.release_path(), test_release)
+            def install_human():
+                release.record(test_release, 'asys-human-interface', human_image,
+                               version=installed['version'], build=installed['build'])
+            install_human()
+            os.environ['ASYS_RELEASE'] = str(test_release)
             empty = temp / 'system.dcomp'
             empty.write_text(f'system {system}\n')
             run(dcomp, 'up', str(empty))
@@ -118,7 +128,7 @@ def main():
             # terminal exists. The service must queue its request independently.
             early_environment = temp / 'early-environment'
             shutil.copytree(ROOT.parent / 'asys-bpmn/examples/human-prompt/env/human', early_environment)
-            (early_environment / 'component.dcomp').write_text('docker early-human:dev\noutput asys.human.v1.Human human\n')
+            (early_environment / 'component.dcomp').write_text('docker early-human\noutput asys.human.v1.Human human\n')
             early_workflow = temp / 'early.bpmn'
             early_workflow.write_text('''<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
               xmlns:asys="urn:asys:workflow:1" targetNamespace="urn:test">
@@ -131,7 +141,7 @@ def main():
                     str(early_environment), str(early_workflow), '--root', str(temp / 'first'),
                     '--workspace', str(temp), '--system', system, '--dcomp-state-root', str(temp / 'dcomp')],
                     stdin=subprocess.DEVNULL, stdout=output, stderr=output, text=True,
-                    env={**os.environ, 'ASYS_STATE_ROOT': str(temp / 'first'), 'ASYS_HUMAN_INTERFACE_IMAGE': human_image})
+                    env={**os.environ, 'ASYS_STATE_ROOT': str(temp / 'first')})
             processes.append(early)
             def queued_before_terminal():
                 assert early.poll() is None, early_log.read_text()
@@ -195,7 +205,7 @@ def main():
               </bpmn:userTask></bpmn:process></bpmn:definitions>''')
             private_environment = temp / 'private-environment'
             shutil.copytree(ROOT.parent / 'asys-bpmn/examples/human-prompt/env/human', private_environment)
-            (private_environment / 'component.dcomp').write_text('docker asys-human-private-example:dev\n')
+            (private_environment / 'component.dcomp').write_text('docker asys-human-private-example\n')
             private_log = temp / 'private.log'
             with private_log.open('w') as output:
                 private = subprocess.Popen([sys.executable, str(ROOT.parent / 'tools/asys-run'),
@@ -223,7 +233,7 @@ def main():
             # manifest incorrectly declares a Human output. Use the shared service.
             terminal_environment = temp / 'terminal-environment'
             shutil.copytree(ROOT.parent / 'asys-bpmn/examples/human-prompt/env/human', terminal_environment)
-            source_manifest = 'docker asys-human-terminal-example:dev\noutput asys.human.v1.Human human\n'
+            source_manifest = 'docker asys-human-terminal-example\noutput asys.human.v1.Human human\n'
             (terminal_environment / 'component.dcomp').write_text(source_manifest)
             shared_workflow = temp / 'shared.bpmn'
             shared_workflow.write_text(private_workflow.read_text().replace('Private request?', 'Shared workflow request?')
@@ -367,8 +377,9 @@ def main():
             # terminal. Worker identities and the global name must stay intact.
             upgrade = temp / 'upgrade'
             upgrade.mkdir()
-            (upgrade / 'Dockerfile').write_text('FROM asys-human-interface:dev\nLABEL asys.update.test=changed\n')
+            (upgrade / 'Dockerfile').write_text(f'FROM {human_image}\nLABEL asys.update.test=changed\n')
             run(['docker'], 'build', '-t', human_image, str(upgrade))
+            install_human()
             old_components = components()
             shared = shared_name
             update = [sys.executable, str(ROOT.parent / 'tools/asys'), 'update', '--root', str(temp / 'first')]

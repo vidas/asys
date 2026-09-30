@@ -38,7 +38,7 @@ func TestPrepareRefreshesExistingProviderImages(t *testing.T) {
 				t.Fatal(err)
 			}
 			if build {
-				if err := os.WriteFile(filepath.Join(source, "Dockerfile"), []byte("FROM asys-runtime:dev\n"), 0600); err != nil {
+				if err := os.WriteFile(filepath.Join(source, "Dockerfile"), []byte("FROM asys-runtime\n"), 0600); err != nil {
 					t.Fatal(err)
 				}
 			}

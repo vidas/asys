@@ -93,6 +93,9 @@ class ComponentHost:
             self.check_interrupt()
         return output
 
+    def image_id(self, reference):
+        return self.command(["docker", "image", "inspect", "--format", "{{.Id}}", reference]).strip()
+
     def document(self, *command, cleanup=False, timeout=120):
         value = json.loads(self.command(self.dcomp + list(command), cleanup=cleanup, timeout=timeout))
         if not isinstance(value, dict) or value.get("api_version") != 2:

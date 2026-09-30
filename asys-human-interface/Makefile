@@ -1,3 +1,5 @@
+include ../build.mk
+
 PREFIX ?= $(HOME)/.local
 HOST_DEPS ?= .host-deps
 .PHONY: host host-deps build install install-host test
@@ -12,12 +14,13 @@ $(HOST_DEPS)/.installed: requirements-host.txt
 	touch "$@"
 
 build: host
-	docker build -f ../asys-runtime/Dockerfile -t asys-runtime:dev ..
-	docker build -f Dockerfile -t asys-human-interface:dev ..
+	$(BUILD_IMAGE) asys-runtime .. ../asys-runtime/Dockerfile
+	$(BUILD_IMAGE) asys-human-interface .. Dockerfile
 
-install-host: host
+install-host:
+	@test -f "$(HOST_DEPS)/.installed" || { echo "asys-human-prompt dependencies are not built; run make first." >&2; exit 1; }
 	$(MAKE) -C .. install-host
-	install -D -m 0755 bin/asys-human-prompt "$(DESTDIR)$(PREFIX)/bin/asys-human-prompt"
+	install -D -m 0755 tools/asys-human-prompt "$(DESTDIR)$(PREFIX)/bin/asys-human-prompt"
 	install -d "$(DESTDIR)$(PREFIX)/share/asys-human/python/asys_human"
 	install -m 0644 python/asys_human/*.py "$(DESTDIR)$(PREFIX)/share/asys-human/python/asys_human/"
 	install -d "$(DESTDIR)$(PREFIX)/share/asys-human/python/asys_runtime"
@@ -26,7 +29,7 @@ install-host: host
 	install -d "$(DESTDIR)$(PREFIX)/share/asys-human/vendor"
 	cp -a "$(HOST_DEPS)/." "$(DESTDIR)$(PREFIX)/share/asys-human/vendor/"
 
-install: build install-host
+install: install-host
 
 test: host-deps
 	npm test

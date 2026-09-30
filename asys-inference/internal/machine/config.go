@@ -18,7 +18,12 @@ import (
 
 const Service = "cyclo.provider.v1.Provider"
 const GlobalName = "inference_endpoint"
-const Version = "0.2.1"
+// Version and Build are set from the checkout's VERSION and build ID by make;
+// a plain go build reports them as unknown.
+var (
+	Version = "unknown"
+	Build   = "unknown"
+)
 
 type Provider struct {
 	Name    string              `json:"name"`

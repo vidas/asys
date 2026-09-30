@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -200,7 +201,7 @@ func (cli CLI) run(ctx context.Context, args []string) error {
 		if len(args) != 0 {
 			return usage("version takes no arguments")
 		}
-		fmt.Fprintf(cli.Out, "asys-inference %s (dcomp 0.3.2; %s)\n", Version, Service)
+		fmt.Fprintf(cli.Out, "asys-inference %s (build %s; dcomp %s; %s)\n", Version, Build, dcompVersion(), Service)
 		return nil
 	}
 	if command == "help" {
@@ -518,4 +519,16 @@ func (cli CLI) show(document *Document, args []string) error {
 	}
 	fmt.Fprintf(cli.Out, "Selected output: @%s -> %s\n", GlobalName, endpoint)
 	return nil
+}
+
+// dcompVersion reports the dcomp module this binary was built against.
+func dcompVersion() string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, module := range info.Deps {
+			if module.Path == "github.com/glguida/dcomp" {
+				return strings.TrimPrefix(module.Version, "v")
+			}
+		}
+	}
+	return "unknown"
 }

@@ -9,8 +9,8 @@ contracts.
 ## Install and initialize
 
 Follow the root [installation guide](../INSTALL.md) for required versions and
-the separate dcomp installation. `make build` builds the host binary and images;
-`make install` installs under `PREFIX`, with `DESTDIR` for staging.
+the separate dcomp installation. `make build` builds the host binary;
+`make install` then installs it under `PREFIX`, with `DESTDIR` for staging.
 
 ```sh
 asys-inference init --root ./state

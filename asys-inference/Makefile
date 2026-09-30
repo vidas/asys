@@ -1,4 +1,7 @@
+include ../build.mk
+
 GO ?= go
+MACHINE := github.com/glguida/asys/asys-inference/internal/machine
 PREFIX ?= $(HOME)/.local
 .PHONY: build test integration install prepare-runtime
 prepare-runtime:
@@ -7,12 +10,15 @@ prepare-runtime:
 	install -m 0644 ../LICENSE ../asys-runtime/LICENSE.multiagent components/vendor/asys-runtime/
 build: prepare-runtime
 	mkdir -p bin
-	CGO_ENABLED=0 $(GO) build -buildvcs=false -trimpath -o bin/asys-inference ./cmd/asys-inference
+	CGO_ENABLED=0 $(GO) build -buildvcs=false -trimpath \
+		-ldflags "-X $(MACHINE).Version=$(ASYS_VERSION) -X $(MACHINE).Build=$(ASYS_BUILD)" \
+		-o bin/asys-inference ./cmd/asys-inference
 test: prepare-runtime
 	$(GO) test ./...
 integration: build
 	tools/integration-test
-install: build
+install:
+	@test -x bin/asys-inference || { echo "asys-inference is not built; run make first." >&2; exit 1; }
 	install -d "$(DESTDIR)$(PREFIX)/bin" "$(DESTDIR)$(PREFIX)/share/asys-inference/components"
 	install -m 0755 bin/asys-inference "$(DESTDIR)$(PREFIX)/bin/"
 	tar --exclude=node_modules --exclude=__pycache__ -C components -cf - . | tar -C "$(DESTDIR)$(PREFIX)/share/asys-inference/components" -xf -

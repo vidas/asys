@@ -12,8 +12,10 @@ import time
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKSPACE = ROOT.parent
-BPMN_IMAGE = os.environ.get("ASYS_BPMN_IMAGE", "asys-bpmn:dev")
-WORKERS_IMAGE = os.environ.get("ASYS_WORKERS_IMAGE", "asys-workers:dev")
+sys.path.insert(0, str(WORKSPACE / "asys-runtime"))
+from asys_runtime import release
+BPMN_IMAGE = os.environ.get("ASYS_BPMN_IMAGE") or release.image("asys-bpmn")[0]
+WORKERS_IMAGE = os.environ.get("ASYS_WORKERS_IMAGE") or release.image("asys-workers")[0]
 sys.path.insert(0, str(ROOT / 'test'))
 from launcher import check_launcher
 sys.path.insert(0, str(WORKSPACE / 'test-support'))
@@ -92,7 +94,7 @@ def main():
             agent_environment = temp / "environment"
             shutil.copytree(WORKSPACE / "asys-workers/env/default", agent_environment)
             dockerfile = agent_environment / "Dockerfile"
-            dockerfile.write_text(dockerfile.read_text().replace("asys-workers:dev", WORKERS_IMAGE))
+            dockerfile.write_text(dockerfile.read_text().replace("FROM asys-workers\n", f"FROM {WORKERS_IMAGE}\n"))
             definition_path = agent_environment / "workers/agent.json"
             definition = json.loads(definition_path.read_text())
             definition['config']['model'] = 'fixture/worker'
@@ -100,7 +102,7 @@ def main():
             environment_tag = f"asys-bpmn-environment-test:{temp.name}"
             tags.append(environment_tag)
             manifest = agent_environment / "component.dcomp"
-            manifest.write_text(manifest.read_text().replace("asys-env-default:dev", environment_tag))
+            manifest.write_text(manifest.read_text().replace("docker asys-env-default\n", f"docker {environment_tag}\n"))
             run(["docker"], "build", "-t", environment_tag, str(agent_environment))
             engine = temp / "engine"
             engine.mkdir()

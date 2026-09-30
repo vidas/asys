@@ -1,0 +1,15 @@
+#!/bin/sh
+# Print this checkout's build ID: VERSION, then the commit, then a timestamp
+# when the tree has uncommitted changes, so a dirty build never reuses a tag.
+set -eu
+root=$(cd "$(dirname "$0")/.." && pwd)
+version=$(cat "$root/VERSION")
+# sudo builds run git as another user; this checkout is the one being built.
+checkout() { git -c "safe.directory=$root" -C "$root" "$@"; }
+if ! commit=$(checkout rev-parse --short=7 HEAD 2>/dev/null); then
+  echo "$version"
+elif [ -n "$(checkout status --porcelain 2>/dev/null)" ]; then
+  echo "$version-$commit-dirty.$(date -u +%Y%m%dT%H%M%S)"
+else
+  echo "$version-$commit"
+fi

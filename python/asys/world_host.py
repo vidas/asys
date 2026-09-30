@@ -8,6 +8,7 @@ import time
 
 from asys_runtime.files import read_json, validate_name, write_json
 from asys_runtime.permissions import mkdir, shared
+from .images import build_image
 from .lifecycle import LaunchError
 from .worker_definitions import definition_command, load_definition
 
@@ -137,10 +138,8 @@ def _image(host, package, component, directory, reference):
     source = package['component'].parent
     if (source / 'Dockerfile').is_file():
         host.say(f'Building world {reference} from {source}')
-        target = directory / 'image'
-        host.command(['docker', 'build', '--iidfile', str(target), str(source)], timeout=900, cancellable=True)
-        return target.read_text().strip()
-    return host.command(['docker', 'image', 'inspect', '--format', '{{.Id}}', component['image_ref']]).strip()
+        return build_image(host, source, directory / 'image')
+    return host.image_id(component['image_ref'])
 
 
 def prepare_worlds(host, environment, config):

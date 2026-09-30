@@ -6,7 +6,7 @@ native provider calls, and usage accounting. Each account is backed by an accoun
 native Pi `Models` runtime, `CredentialStore`, and `ModelsStore` projection.
 
 ```text
-docker cyclo-gateway:dev
+docker cyclo-gateway
 output cyclo.provider.v1.Provider provider
 ```
 

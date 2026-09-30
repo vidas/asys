@@ -11,3 +11,4 @@ asys-env
 **/*.egg-info/
 asys-inference/components/vendor/asys-runtime/
 /.claude/worktrees/
+/release.json

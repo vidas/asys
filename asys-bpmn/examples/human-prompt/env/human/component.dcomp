@@ -1,2 +1,2 @@
-docker asys-human-prompt-example:dev
+docker asys-human-prompt-example
 input asys.human.v1.Human human

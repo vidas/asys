@@ -1,2 +1,2 @@
-docker asys-terrarium-agents:dev
+docker asys-terrarium-agents
 input cyclo.provider.v1.Provider inference

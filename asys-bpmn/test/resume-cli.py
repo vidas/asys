@@ -13,6 +13,9 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 runpy.run_path(str(ROOT.parent / "tools/asys-run"))
 from asys.run import arguments
+import sys
+sys.path.insert(0, str(ROOT.parent / "test-support"))
+from release_fixture import use_fixture_release
 from asys.workflow import Launcher
 from asys import workflow as workflow_module
 module = vars(workflow_module)
@@ -22,6 +25,7 @@ class Resume(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="asys-resume-cli-")
         self.addCleanup(self.temp.cleanup)
+        use_fixture_release(self, self.temp.name, "sha256:updated-workers")
         self.directory = Path(self.temp.name) / "runs" / "abc123"
         for child in ["environment", "engine", "workflow", "workspace"]:
             (self.directory / child).mkdir(parents=True)
@@ -59,8 +63,8 @@ class Resume(unittest.TestCase):
         self.commands.append(command)
         if command[-2:] == ["version", "--json"]:
             return json.dumps({"api_version": 2, "version": "0.3.2"})
-        if command[:3] == ["docker", "build", "--iidfile"]:
-            Path(command[3]).write_text("sha256:updated-workers")
+        if command[:2] == ["docker", "build"]:
+            Path(command[command.index("--iidfile") + 1]).write_text("sha256:updated-workers")
             return ""
         if command[:3] == ["docker", "image", "inspect"]:
             return "sha256:updated-workers"
@@ -293,7 +297,7 @@ class Resume(unittest.TestCase):
         source.mkdir(exist_ok=True)
         config = {"version": 1, "name": "test", "types": {"agent": {"command": ["agent"]}}}
         (source / "workers.json").write_text(json.dumps(config))
-        (source / "Dockerfile").write_text("FROM asys-workers:dev\n")
+        (source / "Dockerfile").write_text("FROM asys-workers\n")
         (source / "component.dcomp").write_text("docker workers:current\n")
         definition = hashlib.sha256(json.dumps(config, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
         descriptor = self.directory / "runtime/environments/test/environment.json"
@@ -310,10 +314,13 @@ class Resume(unittest.TestCase):
         def build(command, **kwargs):
             if command[-2:] == ["version", "--json"]:
                 return json.dumps({"api_version": 2, "version": "0.3.2"})
-            self.assertEqual(command[:3], ["docker", "build", "--iidfile"])
+            if command[:3] == ["docker", "image", "inspect"]:
+                return "sha256:updated-workers"
+            self.assertEqual(command[:2], ["docker", "build"])
+            self.assertIn("asys-workers=docker-image://asys-workers:fixture", command)
             self.assertEqual(command[-1], str(source))
             self.assertEqual(manifest.read_text(), "docker sha256:saved-workers\n")
-            Path(command[3]).write_text("sha256:updated-workers")
+            Path(command[command.index("--iidfile") + 1]).write_text("sha256:updated-workers")
             return ""
 
         with patch.object(self.launcher, "command", side_effect=build):
