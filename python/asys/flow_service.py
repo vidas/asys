@@ -13,6 +13,7 @@ Requests (`id` is echoed back):
   {"op": "rename", "step": PATH, "to": NAME}
   {"op": "connect", "step": PATH, "key": "next"|"on_error"|..., "to": NAME}
   {"op": "undo"} {"op": "redo"} {"op": "save"} {"op": "check"}
+  {"op": "inspect", "step": PATH}          the step's own fields, without the graph
 
 Following a run (read-only; the graph is the run's saved document):
   {"op": "open", "run": DIRECTORY|ID, "root": STATE?}   graph, run status, step states
@@ -263,6 +264,9 @@ def handle(session, request):
         session.edit(lambda: getattr(session, op)(**arguments))
     elif op in {'undo', 'redo', 'save'}:
         getattr(session, op)()
+    elif op == 'inspect':
+        # A step's own fields, as plain JSON in document order, for an inspector.
+        return {'step': request['step'], 'data': json.loads(json.dumps(session._step(request['step']), default=str))}
     elif op != 'check':
         raise EditError(f'unknown request {op!r}')
     return session.state()

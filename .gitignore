@@ -12,3 +12,5 @@ asys-env
 asys-inference/components/vendor/asys-runtime/
 /.claude/worktrees/
 /release.json
+/asys-flow-view/asys-flow-view
+/asys-flow-view/src/*.o

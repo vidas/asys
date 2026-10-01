@@ -246,6 +246,7 @@ class LayoutAndServiceTests(Fixture):
             {'id': 7, 'op': 'undo'},
             {'id': 8, 'op': 'save'},
             {'id': 9, 'op': 'remove', 'step': 'handover'},
+            {'id': 10, 'op': 'inspect', 'step': 'search/global_search'},
         ]
         output = io.StringIO()
         serve(io.StringIO(''.join(json.dumps(request) + '\n' for request in requests)), output)
@@ -267,6 +268,9 @@ class LayoutAndServiceTests(Fixture):
         self.assertFalse(responses[8]['dirty'])
         self.assertEqual(path.read_text(), responses[8]['text'])
         self.assertEqual((responses[9]['ok'], responses[9]['error']), (False, 'no step handover'))
+        # An inspector gets a step's own fields, in document order.
+        self.assertEqual(list(responses[10]['data']), ['run', 'input', 'next'])
+        self.assertEqual(responses[10]['data']['input'], {'request': 'Find a route.'})
 
 
 class RunViewTests(Fixture):

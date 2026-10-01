@@ -383,15 +383,32 @@ Old widgets, current interaction practice:
   antialiased; type is Nimbus Sans (Helvetica metrics) set as the style guide
   specifies, and colours are its palette;
 - keyboard first: every action has a key, and a command palette (`/`) finds
-  any step or action by name;
+  any step or action by name, ranking whole-word matches first;
 - direct manipulation: select a step on the map, edit it in the inspector beside
-  it, connect steps by dragging from one to another; the YAML updates as you go;
-- unlimited undo and redo, and no modal dialogs: errors from validation appear
-  inline next to the step they concern;
-- open a run instead of a file to follow it live: each step shows its state,
-  and selecting it shows its job, result and log;
-- the window remembers its size, split and zoom; resources (`Xdefaults`) can
-  override fonts and colours.
+  it, connect steps by dragging from one to another (with Shift, the error
+  path); the YAML updates as you go;
+- unlimited undo and redo, and no modal dialogs: prompts use the line at the
+  bottom, and errors from validation appear next to the step they concern and
+  in the list below the map;
+- open a run instead of a file to follow it live: each step shows its state by
+  form, never by colour (open until it runs, filled once done, the verde cursor
+  beneath it while it runs, and FAILED in words), and selecting it shows its
+  jobs, results and the end of their logs;
+- the window remembers its size and zoom; resources (`Xdefaults`) can set the
+  fonts and each colour of the palette (`AsysFlowView*map.verde`, ...).
+
+```text
+asys-flow-view [--environment DIR] FILE.yaml    view and edit
+asys-flow-view --run RUN [--root DIR]           follow a run
+
+/ palette   arrows move along the flow   Return edit the selected step
+a add after   r rename   c continue at   e on error   Delete remove
+u, Ctrl+Z undo   Ctrl+Y redo   Ctrl+S save   + - 0 zoom and fit   y YAML   q quit
+```
+
+A double click on a `call` step opens the file it calls. `ASYS_FLOW_SERVICE`
+names another command for the model, for example a checkout's
+`python3 tools/asys workflow serve`.
 
 ## Migration
 

@@ -80,10 +80,15 @@ install-designs:
 		for source do install -D -m 0644 "$$source" "$$destination/$$source"; done' \
 		_ "$(DESTDIR)$(PREFIX)/share/asys" {} +
 
+# The X11 workflow viewer builds where the Xaw, Xft and XRender development
+# files are installed; without them asys works the same, without the viewer.
+VIEWER := $(shell pkg-config --exists xaw7 xmu xt xft xrender fontconfig 2>/dev/null && echo asys-flow-view)
+
 build: host
 	$(MAKE) -C asys-inference build
 	$(MAKE) -C asys-bpmn build
 	$(MAKE) -C asys-human-interface build
+	$(if $(VIEWER),$(MAKE) -C asys-flow-view,@echo "asys-flow-view skipped: install the Xaw, Xft and XRender development packages to build it")
 
 # Installation builds first. Under sudo the build runs as the invoking user, so
 # root never writes into the checkout; only the copying below runs as root.
@@ -96,6 +101,7 @@ install:
 	$(MAKE) -C asys-inference install
 	$(MAKE) -C asys-bpmn install
 	$(MAKE) -C asys-human-interface install
+	$(if $(VIEWER),$(MAKE) -C asys-flow-view install)
 
 test-deps: $(HOST_DEPS)/.installed
 	@set -e; for directory in $(JS_PACKAGES); do $(NPM) --prefix "$$directory" ci --ignore-scripts; done
