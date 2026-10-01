@@ -36,6 +36,8 @@ void MapSelect(Widget map, const char *path);
 /* The spec line at the head of the page: name, format, counts. */
 void MapSetSpec(Widget map, const char *spec);
 const char *MapSelection(Widget map);
+/* A step's kind (run, parallel, switch, ...), or NULL. */
+const char *MapKind(Widget map, const char *path);
 void MapZoom(Widget map, double factor);   /* 0: the largest legible zoom at which every line fits */
 double MapZoomLevel(Widget map);
 void MapSetZoom(Widget map, double zoom);

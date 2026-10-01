@@ -49,7 +49,7 @@
 #define PALETTE_ROWS 14
 
 typedef enum { MINI_NONE, MINI_PALETTE, MINI_RENAME, MINI_ADD, MINI_CONNECT, MINI_ON_ERROR, MINI_FIELD,
-               MINI_RUN, MINI_FOLLOW } MiniMode;
+               MINI_RUN, MINI_FOLLOW, MINI_NEW, MINI_OPEN } MiniMode;
 
 typedef struct {
     char *key;              /* dotted path inside the step */
@@ -90,6 +90,7 @@ static struct {
 
 static void follow(const char *run);
 static void start_run(const char *text);
+static Json *new_step(const char *line);
 
 /* Utilities */
 
@@ -263,7 +264,7 @@ static void apply_state(const Json *reply, void *data) {
     v.can_undo = json_get_bool(reply, "canUndo");
     v.can_redo = json_get_bool(reply, "canRedo");
     const char *text = json_get_string(reply, "text");
-    if (text) XtVaSetValues(v.yaml, XtNstring, text, NULL);
+    if (text && focused != v.yaml) XtVaSetValues(v.yaml, XtNstring, text, NULL);   /* not under the typist */
     show_title();
     if (v.selected && !MapSelection(v.map)) { free(v.selected); v.selected = NULL; }
     inspect();
@@ -318,6 +319,7 @@ static char *value_text(const Json *value) {
 }
 
 static char field_keys[];
+static char yaml_keys[];
 
 static void add_row(const char *key, const Json *value) {
     if (v.row_count >= MAX_ROWS) return;
@@ -647,29 +649,82 @@ static void mini_accept(void) {
     } else if (mode == MINI_FOLLOW) {
         if (*value) follow(value);
     } else if (mode == MINI_ADD) {
-        /* NAME [WORKER]: a run step after the selection, continuing where it continued. */
-        char name[128] = "", worker[128] = "";
-        sscanf(value, "%127s %127s", name, worker);
-        char scope[256] = "";
-        if (selected) scope_of(selected, scope, sizeof scope);
-        Json *step = json_object();
-        if (*worker) json_set(step, "run", json_string(worker));
-        else json_set(step, "end", json_string(name));
-        Json *r = request("add");
-        json_set(r, "scope", json_string(scope));
-        json_set(r, "name", json_string(name));
-        json_set(r, "step", step);
-        send_edit(r, *worker ? "Added." : "Added an end; give it a worker with run to make it a step.");
-        if (selected) {
-            Json *c = request("connect");
-            json_set(c, "step", json_string(selected));
-            json_set(c, "key", json_string("next"));
-            json_set(c, "to", json_string(name));
-            send_edit(c, "Added after the selection.");
+        Json *step = new_step(value);
+        char name[128] = "";
+        sscanf(value, "%127s", name);
+        if (!step) { status("Write NAME KIND [ARGUMENT]: run WORKER, call FILE, wait MESSAGE, delay DURATION, "
+                            "end LABEL, group WORKER, parallel or switch."); }
+        else if (selected) {
+            Json *r = request("insert");
+            json_set(r, "after", json_string(selected));
+            json_set(r, "name", json_string(name));
+            json_set(r, "step", step);
+            send_edit(r, "Added after the selection, which now continues to it.");
+            free(v.selected);
+            char scope[256];
+            scope_of(selected, scope, sizeof scope);
+            v.selected = *scope ? format("%s/%s", scope, name) : strdup(name);
+        } else {
+            Json *r = request("add");
+            json_set(r, "scope", json_string(""));
+            json_set(r, "name", json_string(name));
+            json_set(r, "step", step);
+            send_edit(r, "Added; drag from a step to it to connect it.");
         }
+    } else if (mode == MINI_NEW || mode == MINI_OPEN) {
+        Json *r = request(mode == MINI_NEW ? "create" : "load");
+        json_set(r, "file", json_string(value));
+        if (v.environment) json_set(r, "environment", json_string(v.environment));
+        free(v.file);
+        v.file = strdup(value);
+        free(v.selected);
+        v.selected = NULL;
+        send_edit(r, mode == MINI_NEW ? "Created; a with a step selected adds the next." : "Opened.");
     }
     free((void *)choice);
     free(value);
+}
+
+/* NAME KIND [ARGUMENT] as a new step, or NULL when it does not read as one. */
+static Json *new_step(const char *line) {
+    char name[128] = "", kind[32] = "", argument[512] = "";
+    if (sscanf(line, "%127s %31s %511[^\n]", name, kind, argument) < 2) return NULL;
+    Json *step = json_object();
+    if (!strcmp(kind, "run") && *argument) {
+        json_set(step, "run", json_string(argument));
+        Json *input = json_object();
+        json_set(input, "request", json_string("${request}"));
+        json_set(step, "input", input);
+    } else if (!strcmp(kind, "call") && *argument) {
+        json_set(step, "call", json_string(argument));
+        Json *input = json_object();
+        json_set(input, "request", json_string("${request}"));
+        json_set(step, "input", input);
+    } else if (!strcmp(kind, "wait") && *argument) {
+        json_set(step, "wait", json_string(argument));
+    } else if (!strcmp(kind, "delay")) {
+        json_set(step, "delay", json_string(*argument ? argument : "PT1M"));
+    } else if (!strcmp(kind, "end")) {
+        json_set(step, "end", json_string(*argument ? argument : name));
+    } else if (!strcmp(kind, "group") && *argument) {
+        /* A group starts as one step running ARGUMENT; add more inside it. */
+        Json *inner = json_object(), *steps = json_object(), *group = json_object(), *input = json_object();
+        json_set(inner, "run", json_string(argument));
+        json_set(input, "request", json_string("${request}"));
+        json_set(inner, "input", input);
+        json_set(steps, "first", inner);
+        json_set(group, "start", json_string("first"));
+        json_set(group, "steps", steps);
+        json_set(step, "group", group);
+    } else if (!strcmp(kind, "parallel")) {
+        json_set(step, "parallel", json_array());   /* drag from it to each branch */
+    } else if (!strcmp(kind, "switch")) {
+        json_set(step, "switch", json_array());     /* drag from it to each case */
+    } else {
+        json_free(step);
+        return NULL;
+    }
+    return step;
 }
 
 /* Runs */
@@ -713,6 +768,12 @@ static void command(const char *name) {
     if (!strcmp(name, "fit")) { MapZoom(v.map, 0); return; }
     if (!strcmp(name, "full size")) { MapSetZoom(v.map, 1.0); return; }
     if (!strcmp(name, "go to")) { mini_open(MINI_PALETTE, "Go to:", ""); return; }
+    if (!strcmp(name, "new") || !strcmp(name, "open")) {
+        if (v.run_mode) { status("This window follows a run; start asys-flow-view on a file to edit."); return; }
+        if (v.dirty) { status("Save or undo first: this file has unsaved changes."); return; }
+        mini_open(!strcmp(name, "new") ? MINI_NEW : MINI_OPEN, !strcmp(name, "new") ? "New workflow file:" : "Open:", "");
+        return;
+    }
     if (!strcmp(name, "follow run")) { mini_open(MINI_FOLLOW, "Follow run (ID or prefix):", ""); return; }
     if (!strcmp(name, "start run")) {
         if (v.run_mode) { status("This window follows a run; open the workflow file to start another."); return; }
@@ -742,7 +803,11 @@ static void command(const char *name) {
     if (!strcmp(name, "save")) { send_edit(request("save"), "Saved."); return; }
     if (!strcmp(name, "undo")) { if (v.can_undo) send_edit(request("undo"), "Undone."); else status("Nothing to undo."); return; }
     if (!strcmp(name, "redo")) { if (v.can_redo) send_edit(request("redo"), "Redone."); else status("Nothing to redo."); return; }
-    if (!strcmp(name, "add step after")) { mini_open(MINI_ADD, "New step: NAME WORKER", ""); return; }
+    if (!strcmp(name, "add step after")) {
+        mini_open(MINI_ADD, "New step: NAME KIND [ARG]", "");
+        status("Kinds: run WORKER, call FILE, wait MESSAGE, delay DURATION, end LABEL, group WORKER, parallel, switch.");
+        return;
+    }
     if (!selected) { status("Select a step first."); return; }
     if (!strcmp(name, "rename step")) { mini_open(MINI_RENAME, "Rename to:", strrchr(selected, '/') ? strrchr(selected, '/') + 1 : selected); return; }
     if (!strcmp(name, "connect next")) { mini_open(MINI_CONNECT, "Continue at:", ""); return; }
@@ -801,12 +866,16 @@ static void map_connected(Widget w, XtPointer client, XtPointer call) {
     (void)w; (void)client;
     const MapConnection *c = call;
     if (v.run_mode) return;
-    const char *name = strrchr(c->to, '/');
+    const char *name = strrchr(c->to, '/'), *kind = MapKind(v.map, c->from), *key = c->key;
+    if (!strcmp(key, "next") && kind && !strcmp(kind, "parallel")) key = "branch";
+    if (!strcmp(key, "next") && kind && !strcmp(kind, "switch")) key = "case";
     Json *r = request("connect");
     json_set(r, "step", json_string(c->from));
-    json_set(r, "key", json_string(c->key));
+    json_set(r, "key", json_string(key));
     json_set(r, "to", json_string(name ? name + 1 : c->to));
-    send_edit(r, !strcmp(c->key, "next") ? "Connected." : "Error path set.");
+    send_edit(r, !strcmp(key, "branch") ? "Branch added." : !strcmp(key, "case")
+              ? "Case added, true until you write its condition in the panel." : !strcmp(key, "next") ? "Connected."
+              : "Error path set.");
 }
 
 static void issue_chosen(Widget w, XtPointer client, XtPointer call) {
@@ -921,6 +990,22 @@ static void FieldNext(Widget w, XEvent *e, String *params, Cardinal *count) {
         if (v.rows[i].text == w) { focus(v.rows[(i + 1) % v.row_count].text); return; }
 }
 
+static void YamlApply(Widget w, XEvent *e, String *params, Cardinal *count) {
+    (void)e; (void)params; (void)count;
+    String text;
+    XtVaGetValues(w, XtNstring, &text, NULL);
+    Json *r = request("replace");
+    json_set(r, "text", json_string(text));
+    send_edit(r, "Applied the YAML; undo restores the text before.");
+    focus(NULL);
+}
+
+static void YamlFocus(Widget w, XEvent *e, String *params, Cardinal *count) {
+    (void)e; (void)params; (void)count;
+    focus(w);
+    status("Editing the YAML: Ctrl+Return applies it, Escape leaves it.");
+}
+
 /* The wheel scrolls the Viewport around the widget it turns over; Athena's
  * Viewport has no wheel binding of its own. */
 static void WheelScroll(Widget w, XEvent *e, String *params, Cardinal *count) {
@@ -942,6 +1027,7 @@ static XtActionsRec actions[] = {
     { "command", Command }, { "palette", Palette }, { "mini-accept", MiniAccept }, { "mini-cancel", MiniCancel },
     { "mini-move", MiniMove }, { "field-commit", FieldCommit }, { "field-leave", FieldLeave },
     { "focus-inspector", FocusInspector }, { "field-next", FieldNext }, { "wheel-scroll", WheelScroll },
+    { "yaml-apply", YamlApply }, { "yaml-focus", YamlFocus },
 };
 
 static char wheel_keys[] =
@@ -1013,6 +1099,12 @@ static char entry_keys[] =
     "<Key>Down: mini-move(down)\n"
     "Ctrl<Key>g: mini-cancel()\n";
 
+/* In the YAML pane: Ctrl+Return applies the text as one edit; Escape leaves. */
+static char yaml_keys[] =
+    "Ctrl<Key>Return: yaml-apply()\n"
+    "<Btn1Down>: yaml-focus() select-start()\n"
+    "<Key>Escape: field-leave()\n";
+
 static char field_keys[] =
     "<Key>Return: field-commit() field-leave()\n"
     "<Key>Tab: field-commit() field-next()\n"
@@ -1067,7 +1159,8 @@ int main(int argc, char **argv) {
     v.paned = XtVaCreateManagedWidget("paned", panedWidgetClass, v.top, XtNorientation, XtorientVertical, NULL);
     v.bar = XtVaCreateManagedWidget("bar", boxWidgetClass, v.paned, XtNorientation, XtorientHorizontal,
                                     XtNshowGrip, False, XtNskipAdjust, True, NULL);
-    static const char *const file_entries[][2] = { { "Save                Ctrl+S", "save" }, { "", "" },
+    static const char *const file_entries[][2] = { { "New...", "new" }, { "Open...", "open" }, { "", "" },
+                                                   { "Save                Ctrl+S", "save" }, { "", "" },
                                                    { "Quit                     q", "quit" }, { NULL, NULL } };
     static const char *const edit_entries[][2] = { { "Undo        Ctrl+Z", "undo" }, { "Redo        Ctrl+Y", "redo" }, { "", "" },
                                                    { "Add step after       a", "add step after" },
@@ -1135,7 +1228,8 @@ int main(int argc, char **argv) {
     }
     v.yaml = XtVaCreateManagedWidget("yaml", asciiTextWidgetClass, v.notes, XtNscrollVertical, XawtextScrollWhenNeeded,
                               XtNpreferredPaneSize, 400, XtNmin, 60,
-                              XtNeditType, XawtextRead, XtNstring, "", XtNdisplayCaret, False, NULL);
+                              XtNeditType, v.run_mode ? XawtextRead : XawtextEdit, XtNstring, "", XtNdisplayCaret, False, NULL);
+    if (!v.run_mode) XtOverrideTranslations(v.yaml, XtParseTranslationTable(yaml_keys));
 
     v.mini = XtVaCreateManagedWidget("mini", formWidgetClass, v.paned, XtNshowGrip, False, XtNskipAdjust, True, NULL);
     v.prompt = XtVaCreateManagedWidget("prompt", labelWidgetClass, v.mini, XtNlabel, "/ finds steps and commands",

@@ -11,9 +11,12 @@ Requests (`id` is echoed back):
   {"op": "add", "scope": PATH, "name": NAME, "step": JSON}
   {"op": "remove", "step": PATH}
   {"op": "rename", "step": PATH, "to": NAME}
-  {"op": "connect", "step": PATH, "key": "next"|"on_error"|..., "to": NAME}
+  {"op": "connect", "step": PATH, "key": "next"|"on_error"|"branch"|"case"|..., "to": NAME}
   {"op": "undo"} {"op": "redo"} {"op": "save"} {"op": "check"}
   {"op": "inspect", "step": PATH}          the step's own fields; "" the file's, without steps
+  {"op": "insert", "after": PATH, "name": NAME, "step": JSON}   after a step, taking over its continuation
+  {"op": "replace", "text": YAML}           the whole document, as edited text
+  {"op": "create", "file": PATH, "environment": DIR?}   a new workflow file, loaded
 
 Running the loaded file (it must be saved; asys-run reads it from disk):
   {"op": "start", "request": TEXT, "environment": DIR?, "workspace": DIR?}   run ID and asys-run's log
@@ -164,8 +167,41 @@ class Session:
             target.setdefault('parallel', [])
             if to not in target['parallel']:
                 target['parallel'].append(to)
+        elif key == 'case':   # a new case, true until its condition is written
+            target.setdefault('switch', []).append({'when': 'true', 'next': to})
         else:
             raise EditError(f'cannot connect {key}')
+
+    # A new step's continuation: where the step before it went on.
+    CONTINUES = {'parallel': 'join', 'switch': 'default'}
+
+    def insert(self, after, name, step):
+        """Add STEP as NAME after the step AFTER, which now continues to it;
+        the new step takes over AFTER's continuation."""
+        steps, before = self._locate(after)
+        previous = steps[before]
+        kind = next((kind for kind in flow.KINDS if kind in step), None)
+        if not isinstance(previous, dict) or any(key in previous for key in flow.NO_NEXT):
+            raise EditError(f'{after} does not continue with next; connect from it instead')
+        if not flow.STEP_ID.match(name or ''):
+            raise EditError(f'{name!r} is not a step ID')
+        if name in steps:
+            raise EditError(f'{name} already exists')
+        onward = previous.get('next')
+        if onward and kind != 'end':
+            step[self.CONTINUES.get(kind, 'next')] = onward
+        steps[name] = step
+        previous['next'] = name
+
+    def replace(self, text):
+        """The whole document, as edited text."""
+        try:
+            data = flow.yaml().load(text)
+        except Exception as error:
+            raise EditError(f'not YAML: {error}'.splitlines()[0]) from error
+        if not isinstance(data, dict):
+            raise EditError('a workflow file is a mapping')
+        self.workflow.data = data
 
     def save(self):
         text = self.text()
@@ -302,11 +338,20 @@ def handle(session, request):
         if session.run is None:
             raise EditError('open a run first')
         return session.run.poll() if op == 'poll' else session.run.step(request['step'])
-    if op == 'load':
+    if op == 'create':
+        # A new file: one step, which ends, ready to grow.
+        target = Path(request['file']).expanduser()
+        if target.exists():
+            raise EditError(f'{target} exists')
+        name = request.get('name') or target.stem.replace('_', ' ').replace('-', ' ').capitalize()
+        target.write_text(f'asys: workflow/1\nname: {json.dumps(name)}\nstart: done\nsteps:\n  done: {{end: Done}}\n',
+                          encoding='utf-8')
+        session.load(target, request.get('environment'))
+    elif op == 'load':
         session.load(request['file'], request.get('environment'))
     elif session.workflow is None:
         raise EditError('load a workflow first')
-    elif op in {'set', 'add', 'remove', 'rename', 'connect'}:
+    elif op in {'set', 'add', 'insert', 'remove', 'rename', 'connect', 'replace'}:
         arguments = {key: value for key, value in request.items() if key not in {'op', 'id'}}
         session.edit(lambda: getattr(session, op)(**arguments))
     elif op in {'undo', 'redo', 'save'}:

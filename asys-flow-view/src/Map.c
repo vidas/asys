@@ -781,6 +781,12 @@ void MapSelect(Widget widget, const char *path) {
     show(w);
 }
 
+const char *MapKind(Widget widget, const char *path) {
+    MapWidget w = (MapWidget)widget;
+    int index = find(w, path);
+    return index >= 0 ? w->map.nodes[index].kind : NULL;
+}
+
 const char *MapSelection(Widget widget) {
     MapWidget w = (MapWidget)widget;
     return w->map.selected >= 0 ? w->map.nodes[w->map.selected].id : NULL;

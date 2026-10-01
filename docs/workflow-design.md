@@ -418,7 +418,8 @@ asys-flow-view [-environment dir] file.yaml    view and edit
 asys-flow-view -run run [-root dir]           follow a run
 
 / palette   arrows move along the flow   Return edit the selected step
-a add after   r rename   c continue at   e on error   Delete remove
+a add after (NAME KIND ARG)   r rename   c continue at   e on error   Delete remove
+Ctrl+R run the saved file in a new window   File New, Open   y YAML, edited in place
 u, Ctrl+Z undo   Ctrl+Y redo   Ctrl+S save   + - zoom   0 fit   1 full size
 Tab panel   y YAML   q quit
 ```

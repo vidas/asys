@@ -416,6 +416,38 @@ class ConvertTests(unittest.TestCase):
         self.assertEqual(_value('count(items) + 1'), '${count(items) + 1}')
 
 
+class EditorTests(Fixture):
+    def test_steps_of_any_kind_insert_into_the_chain_and_text_edits_undo(self):
+        from asys.flow_service import EditError, Session, handle
+        session = Session()
+        handle(session, {'op': 'load', 'file': str(self.write(WORKFLOW)), 'environment': str(self.environment)})
+        # brief -> work becomes brief -> pause -> work.
+        handle(session, {'op': 'insert', 'after': 'brief', 'name': 'pause', 'step': {'delay': 'PT1M'}})
+        data = session.workflow.data['steps']
+        self.assertEqual((data['brief']['next'], data['pause']['next']), ('pause', 'work'))
+        # A switch takes over the continuation as its default, and gains cases.
+        handle(session, {'op': 'insert', 'after': 'pause', 'name': 'gate', 'step': {'switch': []}})
+        self.assertEqual(data['gate']['default'], 'work')
+        handle(session, {'op': 'connect', 'step': 'gate', 'key': 'case', 'to': 'accepted'})
+        self.assertEqual(data['gate']['switch'][0], {'when': 'true', 'next': 'accepted'})
+        with self.assertRaisesRegex(EditError, 'does not continue with next'):
+            handle(session, {'op': 'insert', 'after': 'gate', 'name': 'x', 'step': {'end': 'X'}})
+        # The YAML as text, applied as one edit.
+        text = session.text().replace('name: Delivery route review', 'name: Routes')
+        state = handle(session, {'op': 'replace', 'text': text})
+        self.assertIn('name: Routes', state['text'])
+        with self.assertRaisesRegex(EditError, 'not YAML'):
+            handle(session, {'op': 'replace', 'text': 'steps: [unclosed'})
+        self.assertIn('name: Delivery route review', handle(session, {'op': 'undo'})['text'])
+
+    def test_a_new_workflow_starts_as_one_end(self):
+        from asys.flow_service import Session, handle
+        state = handle(Session(), {'op': 'create', 'file': str(self.root / 'board-review.yaml')})
+        self.assertEqual(state['problems'], [])
+        self.assertIn('name: "Board review"', state['text'])
+        self.assertEqual([node['id'] for node in state['graph']['nodes']], ['done'])
+
+
 class StartRunTests(Fixture):
     def test_a_saved_workflow_starts_asys_run_and_names_the_run(self):
         import os

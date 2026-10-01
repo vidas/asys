@@ -56,6 +56,10 @@ The state directory holding runs, as for
 .BI \-service " command"
 The model to run, split at spaces; the \fBservice\fR resource.
 .TP
+.BI \-workspace " dir"
+The project directory runs started here work in; by default the workflow
+file's directory. The \fBworkspace\fR resource.
+.TP
 .B \-help
 Print a summary of the options and exit.
 .PP
@@ -81,9 +85,28 @@ Move the selection along the flow: next, previous, above, below.
 Edit the selected step's fields; Return commits a field, Tab moves to the
 next, Escape returns to the map.
 .TP
-.B a r c e
-Add a step after the selection, rename it, set where it continues, set
-where it continues on error.
+.B a
+Add a step after the selection, which then continues to it while the new
+step takes over where it went: type
+.I "name kind argument"
+with a kind of
+.BI run " worker" ,
+.BI call " file" ,
+.BI wait " message" ,
+.BI delay " duration" ,
+.BI end " label" ,
+.BI group " worker" ,
+.B parallel
+or
+.BR switch .
+.TP
+.B r c e
+Rename the selected step, set where it continues, set where it continues on
+error.
+.TP
+.B Ctrl-R
+Start a run of the saved file: the request is asked on the bottom line, and
+the run opens in a window of its own. The Run menu also follows any run.
 .TP
 .B "Delete, x"
 Remove the selected step.
@@ -101,13 +124,16 @@ Zoom in, zoom out, fit the workflow to the window, full size.
 Show or hide the panel.
 .TP
 .B y
-Show or hide the YAML.
+Show or hide the YAML. Click into it to edit the text; Ctrl-Return applies it
+as one edit, which undo reverses.
 .TP
 .B q
 Quit; with unsaved changes, press it twice.
 .PP
 Drag from one step to another to connect them; with Shift held, the
-connection is the error path. Drag on empty paper, or use the wheel, to
+connection is the error path. Dragging from a parallel step adds a branch, and
+from a switch a case, true until its condition is written in the panel. File
+New and Open start or open another workflow file. Drag on empty paper, or use the wheel, to
 scroll; Ctrl and the wheel zoom. Double-click a call step to open the file it
 calls.
 .SH RESOURCES
