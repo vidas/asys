@@ -1,0 +1,84 @@
+! AsysFlowView: application defaults for asys-flow-view(1).
+!
+! Install as app-defaults/AsysFlowView in a directory XFILESEARCHPATH
+! searches. Override any line in ~/.Xdefaults (with xrdb), with -xrm on the
+! command line, or live with editres(1). The program carries a copy of this
+! file compiled in, used when no installed one is found.
+!
+! Colours are the style guide's: paper #EFE7D6, ink #201A12, rules at ink
+! 45 % #9B9384, campo (ink 7 %) #E1D9C8. Helvetica for words, Courier for
+! identifiers.
+
+! --- The program
+
+! The model it talks to, one JSON line each way.
+*service:			asys workflow serve
+*titleFont:			-adobe-helvetica-bold-r-normal--18-*-*-*-p-*-iso8859-1
+*stepFont:			-adobe-courier-bold-r-normal--18-*-*-*-m-*-iso8859-1
+AsysFlowView.geometry:		1280x820
+
+! --- Everything
+
+*background:			#EFE7D6
+*foreground:			#201A12
+*borderColor:			#9B9384
+*borderWidth:			0
+*font:				-adobe-helvetica-medium-r-normal--12-*-*-*-p-*-iso8859-1
+*Text*font:			-adobe-courier-medium-r-normal--12-*-*-*-m-*-iso8859-1
+*Paned.internalBorderWidth:	1
+*Paned.internalBorderColor:	#9B9384
+*showGrip:			False
+
+! --- The menu bar
+
+*bar.hSpace:			2
+*bar.vSpace:			2
+*bar.MenuButton.internalWidth:	10
+*bar.MenuButton.internalHeight:	3
+*SimpleMenu.borderWidth:	1
+*SimpleMenu.borderColor:	#201A12
+*SimpleMenu*leftMargin:		16
+*SimpleMenu*rightMargin:	16
+*SimpleMenu*vertSpace:		40
+*SimpleMenu*line.foreground:	#9B9384
+
+! --- The map: the workflow in the style guide's grammar
+
+*map.paper:			#EFE7D6
+*map.ink:			#201A12
+*map.verde:			#3E7C5A
+*map.blu:			#2A5CAA
+*map.rosso:			#D8402E
+*map.giallo:			#EFB02C
+*map.sansFont:			Nimbus Sans
+*map.sansBoldFont:		Nimbus Sans:bold
+*map.monoFont:			Nimbus Mono PS
+
+! --- The panel beneath the map
+
+*side*background:		#E1D9C8
+*about.heading.internalWidth:	14
+*about.heading.internalHeight:	8
+*about.subheading.foreground:	#6E675B
+*about.subheading.internalWidth: 14
+*about.issuesTitle.font:	-adobe-helvetica-bold-r-normal--12-*-*-*-p-*-iso8859-1
+*about.issuesTitle.internalWidth: 14
+*about.issuesTitle.internalHeight: 2
+*fields.defaultDistance:	6
+*fields*key.foreground:		#6E675B
+*fields*value.background:	#EFE7D6
+*fields*value.borderWidth:	1
+*fields*value.borderColor:	#E1D9C8
+*issues.background:		#E1D9C8
+*issues.internalWidth:		14
+*yaml.background:		#EFE7D6
+*details.background:		#E1D9C8
+
+! --- The line at the bottom, and the palette above it
+
+*mini*background:		#E1D9C8
+*prompt.internalWidth:		10
+*entry.background:		#E1D9C8
+*palette.borderColor:		#201A12
+*matches.background:		#EFE7D6
+*matches.internalWidth:		10

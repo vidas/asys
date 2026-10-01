@@ -413,8 +413,8 @@ Old widgets, current interaction practice:
   fonts and each colour of the palette (`AsysFlowView*map.verde`, ...).
 
 ```text
-asys-flow-view [--environment DIR] FILE.yaml    view and edit
-asys-flow-view --run RUN [--root DIR]           follow a run
+asys-flow-view [-environment dir] file.yaml    view and edit
+asys-flow-view -run run [-root dir]           follow a run
 
 / palette   arrows move along the flow   Return edit the selected step
 a add after   r rename   c continue at   e on error   Delete remove
@@ -422,9 +422,16 @@ u, Ctrl+Z undo   Ctrl+Y redo   Ctrl+S save   + - zoom   0 fit   1 full size
 Tab panel   y YAML   q quit
 ```
 
-A double click on a `call` step opens the file it calls. `ASYS_FLOW_SERVICE`
-names another command for the model, for example a checkout's
-`python3 tools/asys workflow serve`.
+A double click on a `call` step opens the file it calls.
+
+It behaves as an X application of its kind always has: the program's options
+are resources beside the standard toolkit options (`-display`, `-geometry`,
+`-xrm`); everything it shows is styled by its application defaults file,
+`AsysFlowView`, installed under `share/X11/app-defaults` and compiled in as the
+fallback; it keeps no state of its own; the window manager's close button
+quits; it answers `editres`; and `asys-flow-view(1)` documents it. The
+`service` resource (or `ASYS_FLOW_SERVICE`) names another model command, for
+example a checkout's `python3 tools/asys workflow serve`.
 
 ## Migration
 

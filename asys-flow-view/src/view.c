@@ -1,8 +1,11 @@
 /*
  * asys-flow-view: view and edit workflow files, and follow runs, on X11.
  *
- *   asys-flow-view [--environment DIR] FILE.yaml
- *   asys-flow-view --run RUN [--root DIR]
+ *   asys-flow-view [-toolkitoption ...] [-environment dir] file.yaml
+ *   asys-flow-view [-toolkitoption ...] -run run [-root dir]
+ *
+ * Everything that can be a resource is one: see AsysFlowView.ad, which is
+ * also compiled in as the fallback, and asys-flow-view(1).
  *
  * The model is `asys workflow serve`: this program sends it requests and
  * draws what it returns. Windows, menus, lists and text fields are the stock
@@ -25,6 +28,7 @@
 #include <X11/Xaw/SmeBSB.h>
 #include <X11/Xaw/SmeLine.h>
 #include <X11/Xaw/Viewport.h>
+#include <X11/Xmu/Editres.h>
 
 #include <ctype.h>
 #include <errno.h>
@@ -32,11 +36,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 
 #include "Map.h"
 #include "json.h"
 #include "service.h"
+#include "asys.xbm"
 
 #define MAX_ROWS 128
 #define MAX_ITEMS 512
@@ -72,7 +76,6 @@ static struct {
     String problem_lines[MAX_ITEMS + 1];
     char *problem_steps[MAX_ITEMS];
     int problem_count, listed;        /* listed: the lines the issues List holds */
-    char settings[1024];
 } v;
 
 /* Utilities */
@@ -284,7 +287,9 @@ static void show_rows(void) {
     XtVaSetValues(v.fields, XtNwidth, (Dimension)(text_width + 140), NULL);
     for (int i = 0; i < pooled; i++) {
         if (i < v.row_count) {
-            XtVaSetValues(v.rows[i].text, XtNwidth, text_width, NULL);
+            XFontStruct *font;
+            XtVaGetValues(v.rows[i].text, XtNfont, &font, NULL);
+            XtVaSetValues(v.rows[i].text, XtNwidth, text_width, XtNheight, (Dimension)(font->ascent + font->descent + 6), NULL);
             XtManageChild(v.rows[i].label);
             XtManageChild(v.rows[i].text);
         } else {
@@ -314,11 +319,14 @@ static void add_row(const char *key, const Json *value) {
         row->label = XtVaCreateWidget("key", labelWidgetClass, v.fields, XtNfromVert, above, XtNwidth, 120, XtNresize, False,
                                       XtNjustify, XtJustifyLeft, XtNleft, XtChainLeft, XtNright, XtChainLeft, NULL);
         row->text = XtVaCreateWidget("value", asciiTextWidgetClass, v.fields, XtNfromVert, above, XtNfromHoriz, row->label,
-                                     XtNeditType, XawtextEdit, XtNwidth, 260, XtNdisplayCaret, False,
+                                     XtNeditType, XawtextEdit, XtNwidth, 260, XtNdisplayCaret, False, XtNresizable, True,
                                      XtNleft, XtChainLeft, XtNright, XtChainRight, NULL);
         static XtTranslations keys;
         if (!keys) keys = XtParseTranslationTable(field_keys);
         XtOverrideTranslations(row->text, keys);
+        XFontStruct *font;
+        XtVaGetValues(row->text, XtNfont, &font, NULL);   /* one line of its font, no more */
+        XtVaSetValues(row->text, XtNheight, (Dimension)(font->ascent + font->descent + 6), NULL);
         pooled++;
     }
     XtVaSetValues(row->label, XtNlabel, key, NULL);
@@ -671,13 +679,6 @@ static void command(const char *name) {
     }
     if (!strcmp(name, "quit")) {
         if (v.dirty && !v.quit_armed) { v.quit_armed = 1; status("Unsaved changes: quit again to discard them, or save."); return; }
-        FILE *out = fopen(v.settings, "w");
-        if (out) {
-            Dimension width, height;
-            XtVaGetValues(v.top, XtNwidth, &width, XtNheight, &height, NULL);
-            fprintf(out, "%u %u %.3f\n", width, height, MapZoomLevel(v.map));
-            fclose(out);
-        }
         exit(0);
     }
     if (v.run_mode) { status("A run is read-only."); return; }
@@ -895,54 +896,38 @@ static char text_wheel_keys[] =
     "<Btn4Down>: scroll-one-line-down() scroll-one-line-down() scroll-one-line-down()\n"
     "<Btn5Down>: scroll-one-line-up() scroll-one-line-up() scroll-one-line-up()\n";
 
-/* Flat surfaces in the style guide's palette: paper, campo for the panel and
- * fields, 1-px rules at ink 45 %, Helvetica throughout and Courier for
- * identifiers. The menu bar is the standard one: MenuButtons in a Box. */
+/* The app-defaults file, compiled in: used when no AsysFlowView is installed. */
 static String fallback[] = {
-    "AsysFlowView*background: #EFE7D6",
-    "AsysFlowView*foreground: #201A12",
-    "AsysFlowView*borderColor: #9B9384",
-    "AsysFlowView*borderWidth: 0",
-    "AsysFlowView*font: -adobe-helvetica-medium-r-normal--12-*-*-*-p-*-iso8859-1",
-    "AsysFlowView*Text*font: -adobe-courier-medium-r-normal--12-*-*-*-m-*-iso8859-1",
-    "AsysFlowView*Paned.internalBorderWidth: 1",
-    "AsysFlowView*Paned.internalBorderColor: #9B9384",
-    "AsysFlowView*showGrip: False",
-    "AsysFlowView*bar.hSpace: 2",
-    "AsysFlowView*bar.vSpace: 2",
-    "AsysFlowView*bar.MenuButton.internalWidth: 10",
-    "AsysFlowView*bar.MenuButton.internalHeight: 3",
-    "AsysFlowView*SimpleMenu.borderWidth: 1",
-    "AsysFlowView*SimpleMenu.borderColor: #201A12",
-    "AsysFlowView*SimpleMenu*leftMargin: 16",
-    "AsysFlowView*SimpleMenu*rightMargin: 16",
-    "AsysFlowView*SimpleMenu*vertSpace: 40",
-    "AsysFlowView*SimpleMenu*line.foreground: #9B9384",
-    "AsysFlowView*side*background: #E1D9C8",
-    "AsysFlowView*about.heading.internalWidth: 14",
-    "AsysFlowView*about.heading.internalHeight: 8",
-    "AsysFlowView*about.subheading.foreground: #6E675B",
-    "AsysFlowView*about.subheading.internalWidth: 14",
-    "AsysFlowView*about.issuesTitle.font: -adobe-helvetica-bold-r-normal--12-*-*-*-p-*-iso8859-1",
-    "AsysFlowView*about.issuesTitle.internalWidth: 14",
-    "AsysFlowView*about.issuesTitle.internalHeight: 2",
-    "AsysFlowView*fields.defaultDistance: 6",
-    "AsysFlowView*fields*key.foreground: #6E675B",
-    "AsysFlowView*fields*value.background: #EFE7D6",
-    "AsysFlowView*fields*value.borderWidth: 1",
-    "AsysFlowView*fields*value.borderColor: #E1D9C8",
-    "AsysFlowView*issues.background: #E1D9C8",
-    "AsysFlowView*issues.internalWidth: 14",
-    "AsysFlowView*yaml.background: #EFE7D6",
-    "AsysFlowView*details.background: #E1D9C8",
-    "AsysFlowView*mini*background: #E1D9C8",
-    "AsysFlowView*prompt.internalWidth: 10",
-    "AsysFlowView*entry.background: #E1D9C8",
-    "AsysFlowView*palette.borderColor: #201A12",
-    "AsysFlowView*matches.background: #EFE7D6",
-    "AsysFlowView*matches.internalWidth: 10",
+#include "fallback.h"
     NULL,
 };
+
+/* The program's own options are resources, as the toolkit's are. */
+static struct {
+    String environment, run, root, service;
+    XFontStruct *title_font, *step_font;
+    Boolean help;
+} options;
+
+static XrmOptionDescRec option_table[] = {
+    { "-environment", "*environmentDirectory", XrmoptionSepArg, NULL },
+    { "-run", "*run", XrmoptionSepArg, NULL },
+    { "-root", "*root", XrmoptionSepArg, NULL },
+    { "-service", "*service", XrmoptionSepArg, NULL },
+    { "-help", "*help", XrmoptionNoArg, (XPointer)"True" },
+};
+
+#define OPTION(field) XtOffsetOf(__typeof__(options), field)
+static XtResource option_resources[] = {
+    { "environmentDirectory", "EnvironmentDirectory", XtRString, sizeof(String), OPTION(environment), XtRString, NULL },
+    { "run", "Run", XtRString, sizeof(String), OPTION(run), XtRString, NULL },
+    { "root", "Root", XtRString, sizeof(String), OPTION(root), XtRString, NULL },
+    { "service", "Service", XtRString, sizeof(String), OPTION(service), XtRString, (XtPointer)"asys workflow serve" },
+    { "titleFont", "Font", XtRFontStruct, sizeof(XFontStruct *), OPTION(title_font), XtRString, (XtPointer)XtDefaultFont },
+    { "stepFont", "Font", XtRFontStruct, sizeof(XFontStruct *), OPTION(step_font), XtRString, (XtPointer)XtDefaultFont },
+    { "help", "Help", XtRBoolean, sizeof(Boolean), OPTION(help), XtRImmediate, (XtPointer)False },
+};
+#undef OPTION
 
 static char map_keys[] =
     "<Key>slash: palette()\n"
@@ -992,34 +977,33 @@ static Widget menu(Widget bar, const char *name, const char *label, const char *
     return button;
 }
 
-static void usage(void) {
-    fprintf(stderr, "usage: asys-flow-view [--environment DIR] FILE.yaml\n       asys-flow-view --run RUN [--root DIR]\n");
-    exit(2);
+static void usage(FILE *out, int status) {
+    fprintf(out, "usage: asys-flow-view [-toolkitoption ...] [-environment dir] file.yaml\n"
+                 "       asys-flow-view [-toolkitoption ...] -run run [-root dir]\n"
+                 "other options: -service command, -help; see asys-flow-view(1)\n");
+    exit(status);
 }
 
 int main(int argc, char **argv) {
     XtSetLanguageProc(NULL, NULL, NULL);
-    v.top = XtVaOpenApplication(&v.app, "AsysFlowView", NULL, 0, &argc, argv, fallback, sessionShellWidgetClass,
-                                XtNwidth, 1280, XtNheight, 820, NULL);
-    for (int i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "--environment") && i + 1 < argc) v.environment = strdup(argv[++i]);
-        else if (!strcmp(argv[i], "--run") && i + 1 < argc) v.run = strdup(argv[++i]);
-        else if (!strcmp(argv[i], "--root") && i + 1 < argc) v.root = strdup(argv[++i]);
-        else if (argv[i][0] == '-') usage();
-        else v.file = strdup(argv[i]);
-    }
-    if (!v.file == !v.run) usage();
+    v.top = XtVaOpenApplication(&v.app, "AsysFlowView", option_table, XtNumber(option_table), &argc, argv, fallback,
+                                sessionShellWidgetClass, NULL);
+    XtGetApplicationResources(v.top, &options, option_resources, XtNumber(option_resources), NULL, 0);
+    if (options.help) usage(stdout, 0);
+    if (argc > 2 || (argc == 2 && argv[1][0] == '-')) usage(stderr, 2);
+    v.file = argc == 2 ? strdup(argv[1]) : NULL;
+    v.environment = options.environment ? strdup(options.environment) : NULL;
+    v.run = options.run ? strdup(options.run) : NULL;
+    v.root = options.root ? strdup(options.root) : NULL;
+    if (!v.file == !v.run) usage(stderr, 2);
     v.run_mode = v.run != NULL;
 
-    const char *home = getenv("HOME");
-    snprintf(v.settings, sizeof v.settings, "%s/.config/asys", home ? home : ".");
-    mkdir(v.settings, 0700);
-    strncat(v.settings, "/flow-view", sizeof v.settings - strlen(v.settings) - 1);
-    unsigned width = 0, height = 0;
-    double zoom = 0;
-    FILE *in = fopen(v.settings, "r");
-    if (in) { if (fscanf(in, "%u %u %lf", &width, &height, &zoom) != 3) width = height = 0; fclose(in); }
-    if (width > 200 && height > 200) XtVaSetValues(v.top, XtNwidth, width, XtNheight, height, NULL);
+    /* The icon is the asys symbol; the icon name is what is open. */
+    Display *display = XtDisplay(v.top);
+    Pixmap icon = XCreateBitmapFromData(display, RootWindowOfScreen(XtScreen(v.top)), (char *)asys_bits, asys_width, asys_height);
+    XtVaSetValues(v.top, XtNiconPixmap, icon, XtNiconName, v.file ? base_name(v.file) : "asys run", NULL);
+    /* editres(1) can inspect and change the widget tree. */
+    XtAddEventHandler(v.top, (EventMask)0, True, (XtEventHandler)_XEditResCheckMessages, NULL);
 
     XtAppAddActions(v.app, actions, XtNumber(actions));
     v.paned = XtVaCreateManagedWidget("paned", panedWidgetClass, v.top, XtNorientation, XtorientVertical, NULL);
@@ -1061,11 +1045,8 @@ int main(int argc, char **argv) {
                                       XtNwidth, 1280, XtNmin, 300, XtNinternalBorderWidth, 0, NULL);
     v.notes = XtVaCreateWidget("notes", panedWidgetClass, v.side, XtNorientation, XtorientVertical,
                                XtNwidth, 560, XtNmin, 200, XtNinternalBorderWidth, 0, NULL);   /* the YAML, when shown */
-    Display *display = XtDisplay(v.top);
-    v.mono_heading = XLoadQueryFont(display, "-adobe-courier-bold-r-normal--18-*-*-*-m-*-iso8859-1");
-    v.sans_heading = XLoadQueryFont(display, "-adobe-helvetica-bold-r-normal--18-*-*-*-p-*-iso8859-1");
-    if (!v.mono_heading) v.mono_heading = XLoadQueryFont(display, "fixed");
-    if (!v.sans_heading) v.sans_heading = XLoadQueryFont(display, "fixed");
+    v.mono_heading = options.step_font;
+    v.sans_heading = options.title_font;
     v.heading = XtVaCreateManagedWidget("heading", labelWidgetClass, v.about, XtNlabel, "", XtNjustify, XtJustifyLeft,
                                         XtNfont, v.sans_heading, XtNshowGrip, False, XtNskipAdjust, True, NULL);
     v.subheading = XtVaCreateManagedWidget("subheading", labelWidgetClass, v.about, XtNlabel, "", XtNjustify, XtJustifyLeft,
@@ -1115,17 +1096,18 @@ int main(int argc, char **argv) {
     XtOverrideTranslations(v.yaml, text_wheel);
     XtOverrideTranslations(v.details, text_wheel);
     XtRealizeWidget(v.top);
+    Atom delete = XInternAtom(display, "WM_DELETE_WINDOW", False);
+    XSetWMProtocols(display, XtWindow(v.top), &delete, 1);
+    XtOverrideTranslations(v.top, XtParseTranslationTable("<Message>WM_PROTOCOLS: command(quit)"));
     focus(NULL);
 
     const char *service = getenv("ASYS_FLOW_SERVICE");
-    char *command_line[16] = { "asys", "workflow", "serve", NULL };
-    if (service && *service) {   /* e.g. "python3 /src/asys/tools/asys workflow serve" */
-        char *words = strdup(service), *save = NULL;
-        int n = 0;
-        for (char *word = strtok_r(words, " ", &save); word && n < 15; word = strtok_r(NULL, " ", &save)) command_line[n++] = word;
-        command_line[n] = NULL;
-    }
-    if (service_start(v.app, command_line, lost) < 0) { perror("asys-flow-view: asys workflow serve"); return 1; }
+    if (!service || !*service) service = options.service;
+    char *command_line[16], *words = strdup(service), *save = NULL;
+    int n = 0;
+    for (char *word = strtok_r(words, " ", &save); word && n < 15; word = strtok_r(NULL, " ", &save)) command_line[n++] = word;
+    command_line[n] = NULL;
+    if (!n || service_start(v.app, command_line, lost) < 0) { perror("asys-flow-view: service"); return 1; }
     if (v.run_mode) {
         Json *r = request("open");
         json_set(r, "run", json_string(v.run));
@@ -1140,7 +1122,6 @@ int main(int argc, char **argv) {
         if (v.environment) status("Worker types are checked against the environment %s.", base_name(v.environment));
         else status("No environment given: worker types are not checked.");
     }
-    if (zoom > 0) MapSetZoom(v.map, zoom);
     show_title();
     XtAppMainLoop(v.app);
     return 0;

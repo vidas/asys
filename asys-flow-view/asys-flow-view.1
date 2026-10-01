@@ -1,0 +1,173 @@
+.TH ASYS-FLOW-VIEW 1 "October 2026" "asys" "User Commands"
+.SH NAME
+asys-flow-view \- view and edit asys workflow files, and follow runs
+.SH SYNOPSIS
+.B asys-flow-view
+[\fI\-toolkitoption\fR ...]
+[\fB\-environment\fR \fIdir\fR]
+.I file.yaml
+.br
+.B asys-flow-view
+[\fI\-toolkitoption\fR ...]
+.B \-run
+.I run
+[\fB\-root\fR \fIdir\fR]
+.SH DESCRIPTION
+.I asys-flow-view
+shows an asys workflow file (\fBasys: workflow/1\fR) as a map: steps are
+triangles on a rail that runs left to right and wraps into lines, top to
+bottom, when it is longer than the window. Hue names the kind of work: green
+agents, blue programs, red humans, yellow gateways where the rail forks and
+joins. Groups and repeats are flat fields the rail crosses.
+.PP
+Selecting a step shows its fields in the panel beneath the map, where they can
+be edited; problems found by validation are marked on the map and listed in
+the panel. Every edit goes to the file's YAML, keeping its comments and order,
+and can be undone. Nothing is written until the file is saved.
+.PP
+With
+.BR \-run ,
+the program follows a run instead: steps not yet reached are open, finished
+ones filled, running ones carry a cursor beneath them, and a failure says so.
+Selecting a step shows its jobs, results and the end of their logs. A run is
+read only.
+.PP
+The program is a client of
+.BR "asys workflow serve" ,
+which it runs as a child and speaks to in lines of JSON on its standard input
+and output; that process loads, lays out, edits, validates and saves.
+.SH OPTIONS
+.TP
+.BI \-environment " dir"
+Check worker types, program arguments and human forms against the worker
+environment in
+.IR dir .
+Without it, everything else is checked.
+.TP
+.BI \-run " run"
+Follow a run: a run ID, an unambiguous prefix of one, or its directory.
+.TP
+.BI \-root " dir"
+The state directory holding runs, as for
+.BR "asys --help" .
+.TP
+.BI \-service " command"
+The model to run, split at spaces; the \fBservice\fR resource.
+.TP
+.B \-help
+Print a summary of the options and exit.
+.PP
+The program also accepts the standard X Toolkit options, among them
+.BR \-display ,
+.BR \-geometry ,
+.BR \-iconic ,
+.BR \-name ,
+.B \-xrm
+and
+.BR \-fn ;
+see
+.BR X (7).
+.SH "KEYS AND MOUSE"
+.TP 12
+.B /
+Go to a step or command by name; matching letters are enough.
+.TP
+.B Arrows
+Move the selection along the flow: next, previous, above, below.
+.TP
+.B Return
+Edit the selected step's fields; Return commits a field, Tab moves to the
+next, Escape returns to the map.
+.TP
+.B a r c e
+Add a step after the selection, rename it, set where it continues, set
+where it continues on error.
+.TP
+.B "Delete, x"
+Remove the selected step.
+.TP
+.B "u, Ctrl-Z"
+Undo; \fBCtrl-Y\fR redoes.
+.TP
+.B Ctrl-S
+Save.
+.TP
+.B "+ \- 0 1"
+Zoom in, zoom out, fit the workflow to the window, full size.
+.TP
+.B Tab
+Show or hide the panel.
+.TP
+.B y
+Show or hide the YAML.
+.TP
+.B q
+Quit; with unsaved changes, press it twice.
+.PP
+Drag from one step to another to connect them; with Shift held, the
+connection is the error path. Drag on empty paper, or use the wheel, to
+scroll; Ctrl and the wheel zoom. Double-click a call step to open the file it
+calls.
+.SH RESOURCES
+The class is
+.BR AsysFlowView .
+Every resource the program uses is in its application defaults file, which
+documents them; the program carries a copy compiled in. The program's own:
+.TP
+.B service \fR(class \fBService\fR)
+The model command, default
+.BR "asys workflow serve" .
+.TP
+.B environmentDirectory\fR, \fBrun\fR, \fBroot
+Set by the options of the same meaning.
+.TP
+.B titleFont\fR, \fBstepFont
+The panel's heading fonts for the workflow and for a step.
+.TP
+.B map.paper\fR, \fBmap.ink\fR, \fBmap.verde\fR, \fBmap.blu\fR, \fBmap.rosso\fR, \fBmap.giallo
+The map's colours; the rails and fields are drawn from paper and ink.
+.TP
+.B map.sansFont\fR, \fBmap.sansBoldFont\fR, \fBmap.monoFont
+The map's typefaces, as fontconfig names.
+.PP
+For example, in
+.IR ~/.Xdefaults :
+.PP
+.nf
+.RS
+AsysFlowView.geometry:   1600x1000
+AsysFlowView*map.verde:  #2E6B4A
+.RE
+.fi
+.PP
+The program answers
+.BR editres (1),
+which shows its widget tree and changes resources while it runs.
+.SH ENVIRONMENT
+.TP
+.B DISPLAY
+The X server to use.
+.TP
+.B XENVIRONMENT
+A resource file read in place of the host's defaults; see
+.BR X (7).
+.TP
+.B ASYS_FLOW_SERVICE
+When set, overrides the \fBservice\fR resource.
+.SH FILES
+.TP
+.I $PREFIX/share/X11/app-defaults/AsysFlowView
+The application defaults, found through
+.BR XFILESEARCHPATH .
+.TP
+.I ~/.Xdefaults
+Personal resources, loaded with
+.BR xrdb (1).
+.SH "SEE ALSO"
+.BR editres (1),
+.BR xrdb (1),
+.BR X (7);
+.B "asys workflow \-\-help"
+for checking and converting workflow files.
+.SH BUGS
+Labels outside the map use the core X fonts, which are Latin-1.
