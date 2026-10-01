@@ -15,7 +15,9 @@ Every execution shape writes ordinary run/job records. Observation takes the
 same asys `--root` as execution. A root can contain runs from several dcomp
 systems; the dashboard's system filter selects among them and survives refresh.
 `--run` limits a dashboard to one run, resolved when it starts: the server lists
-and serves no other run, and the page opens on it.
+and serves no other run, and the page opens on it. The dashboard answers only
+requests addressed to `localhost`; `--allow-host server:PORT` adds the name a
+forwarded browser uses, for example behind `ssh -R`.
 
 The workflow view distinguishes worker kinds, branches and return paths.
 Program tasks expose results and logs. Senate and swarm selections connect to

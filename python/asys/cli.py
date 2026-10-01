@@ -77,6 +77,9 @@ def system_or_run_status(args):
 def validate_dashboard(parser, args):
     if not 0 <= args.port <= 65535:
         parser.error('--port must be between 0 and 65535')
+    for host in args.allow_host or ():
+        if not host or any(c in host for c in '/ \t') or host.count(':') > 1:
+            parser.error(f'--allow-host takes HOST or HOST:PORT, not {host!r}')
 
 
 def root_options(description, default):
@@ -221,6 +224,9 @@ def arguments(argv):
     board.add_argument('--run', metavar='RUN',
                        help='show only this run (run ID or unique prefix, or latest); '
                             'the dashboard serves no other run')
+    board.add_argument('--allow-host', action='append', metavar='HOST[:PORT]',
+                       help='also answer requests addressed to this name, as the browser sends it '
+                            '(for example server:9123 behind ssh -R); repeatable')
     board.add_argument('--port', type=int, default=0,
                        help='local HTTP port (default: select an available port)')
     board.add_argument('--design', type=Path, metavar='DIRECTORY',

@@ -646,7 +646,7 @@ class DashboardData:
 
 
 class Dashboard:
-    def __init__(self, root, *, port=0, design=None, run=None):
+    def __init__(self, root, *, port=0, design=None, run=None, hosts=()):
         self.data = DashboardData(root, run)
         self.design = Design(design)
         self.lock = threading.RLock()
@@ -765,7 +765,9 @@ class Dashboard:
         self.server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
         self.server.daemon_threads = True
         self.port = self.server.server_address[1]
-        self.hosts = {f'127.0.0.1:{self.port}', f'localhost:{self.port}'}
+        # Requests must name this server, which stops DNS rebinding; names
+        # given with --allow-host are accepted as well, exactly as written.
+        self.hosts = {f'127.0.0.1:{self.port}', f'localhost:{self.port}', *hosts}
         self.url = f'http://127.0.0.1:{self.port}/'
         self.thread = None
 
@@ -782,7 +784,8 @@ class Dashboard:
 
 
 def dashboard(args):
-    viewer = Dashboard(args.root, port=args.port, design=args.design, run=getattr(args, 'run', None)).start()
+    viewer = Dashboard(args.root, port=args.port, design=args.design, run=getattr(args, 'run', None),
+                       hosts=getattr(args, 'allow_host', None) or ()).start()
     scope = f'\nRun: {viewer.data.run_id}' if viewer.data.run_id else ''
     print(f'Dashboard: {viewer.url}\nState: {viewer.data.root}{scope}\nPress Ctrl-C to close the dashboard.', flush=True)
     try:

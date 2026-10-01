@@ -14,6 +14,9 @@
 - `asys-flow-view` views and edits workflow files on X11, in the style guide's
   graphic language, and follows runs live. It builds where the Xaw, Xft and
   XRender development files are installed.
+- `asys dashboard --allow-host HOST[:PORT]` also answers requests addressed to
+  that name, so a dashboard can be reached through `ssh -R` or a proxy that
+  keeps the browser's host; other names are still refused.
 - `asys dashboard --run RUN` serves a single run: it is resolved once at
   start, the overview lists only it, every other run's data and controls are
   refused, and the page opens on it.

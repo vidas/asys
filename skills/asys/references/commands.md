@@ -65,7 +65,7 @@ asys ps [--json] [--root DIRECTORY]
 asys status [RUN] [--json] [--root DIRECTORY]
 asys logs [RUN] [JOB] [--source SOURCE] [--stream STREAM] [-f] [-n N] [--root DIRECTORY]
 asys top [RUN] [--root DIRECTORY]
-asys dashboard [--run RUN] [--port PORT] [--design DIRECTORY] [--root DIRECTORY]
+asys dashboard [--run RUN] [--port PORT] [--allow-host HOST[:PORT]] [--design DIRECTORY] [--root DIRECTORY]
 asys skill [DEST] [--name asys|asys-authoring]
 ```
 
@@ -81,6 +81,12 @@ run; `ps` lists saved runs.
 dashboard starts (an ID, unique prefix or `latest`). Its overview lists only that
 run, and requests for any other run, including execution controls, are refused.
 Controls for the run itself remain available.
+
+The dashboard listens on 127.0.0.1 and answers only requests addressed to
+`127.0.0.1:PORT` or `localhost:PORT`. Behind a forward such as `ssh -R`, the
+browser names the forwarding server instead: `--allow-host server:9123` (as
+the browser's address bar shows it, repeatable) accepts that name too.
+Whoever reaches an allowed name can use the dashboard's execution controls.
 
 Log sources: `run`, `events`, `jobs`, `components`, `commands`. A JOB or stream
 selects `jobs`; streams are `stdout`, `stderr`, `both`. Default output is the

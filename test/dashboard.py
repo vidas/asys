@@ -593,6 +593,26 @@ class DashboardTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'not saved in this state root'):
             DashboardData(self.root, str(foreign))
 
+    def test_http_allowed_hosts_are_exact_and_extend_the_local_names(self):
+        server = Dashboard(self.root, hosts=['remote.example:9123']).start()
+        self.addCleanup(server.close)
+        def get(host):
+            connection = http.client.HTTPConnection('127.0.0.1', server.port)
+            connection.request('GET', '/api/runs', headers={'Host': host})
+            status = connection.getresponse().status
+            connection.close()
+            return status
+        self.assertEqual(get('remote.example:9123'), 200)
+        self.assertEqual(get(f'localhost:{server.port}'), 200)
+        for refused in ('remote.example', 'remote.example:9124', 'other.example:9123', 'REMOTE.example:9123x'):
+            self.assertEqual(get(refused), 403, refused)
+        connection = http.client.HTTPConnection('127.0.0.1', server.port)
+        connection.request('POST', '/api/runs/workflow-run/jobs/child-1/control', '{"action":"pause"}',
+                           {'Host': 'remote.example:9123', 'Origin': 'http://remote.example:9123',
+                            'Content-Type': 'application/json'})
+        self.assertEqual(connection.getresponse().status, 202)
+        connection.close()
+
     def test_http_run_scope_refuses_other_runs_and_their_controls(self):
         self.other_run()
         server = Dashboard(self.root, run='workflow-run').start()
