@@ -217,7 +217,7 @@ bind human {human_state} /var/lib/asys-human rw
                 assert result['environment'] == environment
                 expected = 'Prepare a draft.' if environment == 'dummy' else 'The draft is ready.'
                 assert json.loads(result['outputJson'])['work']['final'] == expected, result
-            check_launcher(ROOT, dcomp, system, temp, run, until, log, agent_environment, tags)
+            check_launcher(ROOT, dcomp, system, temp, run, until, log, agent_environment, tags, dummy_environment)
             print("PASS: filesystem host channels, real dcomp interfaces, environment selection, Provider/Pi tools, human attention push and reconnect, decisions, restart recovery, path-based CLI, failures, cancellation, and cleanup preserving existing components.")
             (ROOT / 'integration-failure.log').unlink(missing_ok=True)
         except BaseException:

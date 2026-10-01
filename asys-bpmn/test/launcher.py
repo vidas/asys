@@ -7,8 +7,10 @@ import signal
 import subprocess
 import sys
 
+from asys_runtime.release import build_contexts
 
-def check_launcher(root, dcomp, system, temp, run, until, log, agent_environment, tags):
+
+def check_launcher(root, dcomp, system, temp, run, until, log, agent_environment, tags, dummy_environment):
     before = {item['name']: item['status']['container_id'] for item in
               json.loads(run(dcomp, 'view', '--json', system))['components']}
     project = temp / 'project with spaces'
@@ -94,7 +96,7 @@ def check_launcher(root, dcomp, system, temp, run, until, log, agent_environment
         manifest = (environment / 'component.dcomp').read_text().splitlines()
         manifest[0] = f'docker {tag}'
         (image_environment / 'component.dcomp').write_text('\n'.join(manifest) + '\n')
-        run(['docker'], 'build', '-t', tag, str(environment))
+        run(['docker'], 'build', *build_contexts(), '-t', tag, str(environment))
         workflow_file.write_text(hello.replace('import json', 'from pathlib import Path\np = Path("partial.txt")\nif not p.exists():\n    p.write_text("partial work")\n    raise SystemExit(17)\nassert p.read_text() == "partial work"\nassert Path("/opt/asys/environment/tag-fix-installed").exists()\nimport json'))
         failed = subprocess.run(launcher + [str(image_environment), str(workflow_file), *common],
                                 capture_output=True, text=True, timeout=180)
@@ -104,7 +106,7 @@ def check_launcher(root, dcomp, system, temp, run, until, log, agent_environment
         previous_image = (retry_run / 'environment/component.dcomp').read_text()
         (project / 'workflow.bpmn').rename(project / 'hidden.bpmn')
         (environment / 'tag-fix-installed').touch()
-        run(['docker'], 'build', '-t', tag, str(environment))
+        run(['docker'], 'build', *build_contexts(), '-t', tag, str(environment))
         try:
             output = json.loads(run(launcher, '--resume', retry_run.name[:8], '--root', str(cli_root)))
             assert output['greet']['message'] == 'Hello from asys.', output
@@ -128,7 +130,7 @@ def check_launcher(root, dcomp, system, temp, run, until, log, agent_environment
         dockerfile = environment / 'Dockerfile'
         original = dockerfile.read_text().splitlines()
         (base / 'Dockerfile').write_text(original[0] + '\n')
-        run(['docker'], 'build', '-t', base_tag, str(base))
+        run(['docker'], 'build', *build_contexts(), '-t', base_tag, str(base))
         dockerfile.write_text('\n'.join([f'FROM {base_tag}', *original[1:]]) + '\n')
         workflow_file.write_text(hello.replace('import json', 'from pathlib import Path\nif not Path("/opt/asys/environment/fix-installed").exists():\n    Path("partial.txt").write_text("partial work")\n    raise SystemExit(17)\nassert Path("partial.txt").read_text() == "partial work"\nimport json'))
         failed = subprocess.run(launcher + [str(environment), str(workflow_file), *common],
@@ -140,7 +142,7 @@ def check_launcher(root, dcomp, system, temp, run, until, log, agent_environment
         previous_image = manifest.read_text()
         (base / 'fix-installed').touch()
         (base / 'Dockerfile').write_text(original[0] + '\nUSER root\nCOPY fix-installed /opt/asys/environment/fix-installed\nUSER node\n')
-        run(['docker'], 'build', '-t', base_tag, str(base))
+        run(['docker'], 'build', *build_contexts(), '-t', base_tag, str(base))
         output = json.loads(run(launcher, '--resume', retry_run.name, '--root', str(cli_root)))
         assert output['greet']['message'] == 'Hello from asys.', output
         observed = json.loads(run(observer, 'status', str(retry_run), '--json'))
@@ -205,7 +207,7 @@ def check_launcher(root, dcomp, system, temp, run, until, log, agent_environment
                             probe.mkdir(mode=0o700)
                             run(dcomp, 'add-component', '--user', expected_user,
                                 '--bind', f'{probe},/var/lib/asys/runtime,rw', system, 'mount-probe',
-                                str(root / 'examples/hello/env/dummy'))
+                                str(dummy_environment))
                             current = {item['name']: item['status']['container_id'] for item in
                                        json.loads(run(dcomp, 'view', '--json', system))['components']}
                             for item in (engine, component):
@@ -255,7 +257,7 @@ def check_launcher(root, dcomp, system, temp, run, until, log, agent_environment
         assert 'program: command must be a nonempty argument list' in failed.stderr
         assert not (directory / 'components.log').exists()
         records = [json.loads((directory / 'run.json').read_text()) for directory in (cli_root / 'runs').iterdir()]
-        assert len(records) == 13 and all(record['components_removed'] for record in records), records
+        assert len(records) == 14 and all(record['components_removed'] for record in records), records
         after = {item['name']: item['status']['container_id'] for item in
                  json.loads(run(dcomp, 'view', '--json', system))['components']}
         assert before == after, (before, after)
