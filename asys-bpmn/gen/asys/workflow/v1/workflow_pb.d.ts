@@ -11,6 +11,9 @@ import type { Message } from "@bufbuild/protobuf";
 export declare const file_asys_workflow_v1_workflow: GenFile;
 
 /**
+ * A BPMN document, or a workflow/1 document resolved with its calls
+ * (asys workflow resolve FILE): one of the two.
+ *
  * @generated from message asys.workflow.v1.LoadWorkflowRequest
  */
 export declare type LoadWorkflowRequest = Message<"asys.workflow.v1.LoadWorkflowRequest"> & {
@@ -18,6 +21,11 @@ export declare type LoadWorkflowRequest = Message<"asys.workflow.v1.LoadWorkflow
    * @generated from field: string bpmn_xml = 1;
    */
   bpmnXml: string;
+
+  /**
+   * @generated from field: string workflow_json = 2;
+   */
+  workflowJson: string;
 };
 
 /**

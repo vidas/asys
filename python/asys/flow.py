@@ -16,15 +16,17 @@ from ruamel.yaml.error import YAMLError
 FORMAT = 'workflow/1'
 KINDS = ('run', 'parallel', 'group', 'call', 'switch', 'repeat', 'choose', 'wait', 'delay', 'compensate', 'end')
 COMMON = {'next', 'on_error', 'timeout', 'on_timeout', 'undo', 'description'}
+# result: a shared name the step's result is also stored under, as several
+# steps may update one ledger (BPMN's asys:job result attribute).
 FIELDS = {
-    'run': {'input', 'args', 'for_each', 'as', 'sequential', 'until'},
+    'run': {'input', 'args', 'for_each', 'as', 'sequential', 'until', 'result'},
     'parallel': {'join'},
-    'group': {'for_each', 'as', 'sequential', 'until'},
-    'call': {'input', 'for_each', 'as', 'sequential', 'until'},
+    'group': {'for_each', 'as', 'sequential', 'until', 'result'},
+    'call': {'input', 'for_each', 'as', 'sequential', 'until', 'result'},
     'switch': {'default'},
-    'repeat': set(),
-    'choose': set(),
-    'wait': set(),
+    'repeat': {'result'},
+    'choose': {'result'},
+    'wait': {'result'},
     'delay': set(),
     'compensate': set(),
     'end': set(),
@@ -338,7 +340,8 @@ def _check_scope(document, at, steps, start, start_at, outer, kinds, report, *, 
             report(f'{at}.{name}', f'{name} is already a name in an enclosing scope')
     if start not in steps:
         report(start_at, f'start must name a step of this scope (found {start!r})')
-    visible = outer | set(steps)
+    shared = {step['result'] for step in steps.values() if isinstance(step, dict) and isinstance(step.get('result'), str)}
+    visible = outer | set(steps) | shared
     referenced = {'branch': set(), 'action': set(), 'undo': set()}
     # Actions run at a coordinator's request and read its input as `message`.
     actions = {action for step in steps.values() if isinstance(step, dict) and isinstance(step.get('choose'), dict)
@@ -366,6 +369,10 @@ def _check_scope(document, at, steps, start, start_at, outer, kinds, report, *, 
         for key in ('next', 'on_error', 'on_timeout'):
             if key in step:
                 target(f'{where}.{key}', step[key])
+        if 'result' in step and (not isinstance(step['result'], str) or not STEP_ID.match(step['result'])
+                                 or step['result'] in {'request', 'item', 'index', 'message'}):
+            report(f'{where}.result', 'result is a name: lowercase letters, digits and _, and not request, item, '
+                                      'index or message')
         if 'undo' in step:
             target(f'{where}.undo', step['undo'])
             referenced['undo'].add(step['undo'])

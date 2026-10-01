@@ -332,9 +332,12 @@ class ConvertTests(unittest.TestCase):
         self.assertEqual(steps['decision']['switch'][0]['when'], 'human_help.action = "accept"')
         self.assertIn('${(if human_help.comments = null', steps['handover']['input']['request'])
 
-    def test_result_variables_become_step_ids_wherever_they_are_read(self):
+    def test_result_variables_keep_their_meaning_as_shared_results(self):
+        # BPMN result variables may be written by several tasks; a step's
+        # result: name keeps that, named in the file's style everywhere it is read.
         text, result = self.convert('asys-bpmn/test/fixtures/named-swarm.bpmn')
-        self.assertIn('when: search.output.achieved = true', text)
+        self.assertIn('result: search_result', text)
+        self.assertIn('when: search_result.output.achieved = true', text)
         self.assertNotIn('searchResult', text)
 
     def test_what_a_workflow_file_cannot_express_is_refused_with_the_reason(self):

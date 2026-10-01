@@ -43,6 +43,15 @@ def serve_workflows(args):
     serve()
 
 
+def resolve_workflow(args):
+    from . import flow
+    problems = []
+    workflow = flow.load_all(args.file, problems)
+    for problem in problems + flow.check(workflow, args.environment):
+        print(problem, file=sys.stderr)
+    print(json.dumps(flow.resolved(workflow)))
+
+
 def convert_workflow(args):
     from .flow_convert import convert
     text, result = convert(args.file.read_text(encoding='utf-8'), args.process)
@@ -148,6 +157,12 @@ def arguments(argv):
     checking.add_argument('--json', action='store_true', help='print problems as a JSON list')
     add_command(operations, 'serve', serve_workflows,
                 'Edit workflows through JSON requests on stdin, one per line (used by viewers)')
+    resolving = add_command(operations, 'resolve', resolve_workflow,
+                            'Print a workflow and the files it calls as the one JSON document a run loads')
+    resolving.add_argument('file', type=Path, metavar='FILE')
+    resolving.add_argument('--environment', type=Path, metavar='DIRECTORY',
+                           default=os.environ.get('ASYS_ENVIRONMENT_DIR') or None,
+                           help='report problems against this environment (default: $ASYS_ENVIRONMENT_DIR)')
     converting = add_command(operations, 'convert', convert_workflow,
                              'Write the workflow file a BPMN process corresponds to')
     converting.add_argument('file', type=Path, metavar='FILE.bpmn')

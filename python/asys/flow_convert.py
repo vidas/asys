@@ -125,6 +125,7 @@ class _Process:
         local = {'request', 'message', 'item', 'index'} | {name for name, _ in flow._all_steps(steps)}
         local |= {name.rsplit('.', 1)[-1] for name, _ in flow._all_steps(steps)}
         local |= {step.get('as') for _, step in flow._all_steps(steps) if step.get('as')}
+        local |= {step.get('result') for _, step in flow._all_steps(steps) if step.get('result')}
         extra = sorted(read - local)
         if extra:   # declared after the name, before the steps, where a reader looks
             inputs = {'request': {'type': 'string'}, **{name: {} for name in extra}}
@@ -227,8 +228,7 @@ class _Process:
             return {'run': 'unknown'}
         job = jobs[0]
         step = {'run': job.get('type', 'unknown')}
-        result_name = job.get('result') or identifier
-        self.renames[result_name] = self.step_id(identifier)
+        self.shared_result(job.get('result'), identifier, step)
         if element.get('name') and element.get('name') != identifier:
             step['description'] = element.get('name')
         if job.get('input') is None:
@@ -328,6 +328,19 @@ class _Process:
             if message.get('id') == reference:
                 return message.get('name') or reference
         return reference or element.get('id')
+
+    def shared_result(self, result, identifier, step):
+        """Where a step's result is read from. By default a task's result is its
+        own ID, which is the step's; a named result variable, which several tasks
+        may write, becomes the step's result: name, so the meaning is kept."""
+        if not result or result == identifier:
+            self.renames[identifier] = self.step_id(identifier)
+            return
+        name = _name(result)
+        step['result'] = name
+        self.renames[identifier] = self.step_id(identifier)
+        if name != result:
+            self.renames[result] = name
 
     def boundaries(self, element, step, steps, stop):
         """A task's boundary events as its error and timeout paths.
@@ -478,8 +491,8 @@ class _Process:
         condition = element.find(f'{BPMN}completionCondition')
         if condition is not None and (condition.text or '').strip():
             choose['until'] = _feel(condition.text)
-        self.renames[jobs[0].get('result') or identifier] = self.step_id(identifier)
         step = {'choose': choose}
+        self.shared_result(jobs[0].get('result'), identifier, step)
         following = self.follow(element, steps, stop)
         if following:
             step['next'] = following
@@ -516,6 +529,12 @@ class _Process:
 
 
 # FEEL to YAML
+
+def _name(text):
+    """TEXT as a workflow file name: lowercase words joined by _."""
+    name = re.sub(r'[^a-z0-9_]+', '_', re.sub(r'([a-z0-9])([A-Z])', r'\1_\2', text).lower()).strip('_')
+    return name if name and name[0].isalpha() else f'v_{name}'
+
 
 def _feel(text):
     return (text or '').strip().removeprefix('=').strip()

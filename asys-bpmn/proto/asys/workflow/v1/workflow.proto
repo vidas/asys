@@ -19,7 +19,12 @@ service Workflow {
   rpc GetEvents(GetEventsRequest) returns (GetEventsResponse);
 }
 
-message LoadWorkflowRequest { string bpmn_xml = 1; }
+// A BPMN document, or a workflow/1 document resolved with its calls
+// (asys workflow resolve FILE): one of the two.
+message LoadWorkflowRequest {
+  string bpmn_xml = 1;
+  string workflow_json = 2;
+}
 message LoadWorkflowResponse { string workflow_id = 1; }
 message ListWorkflowsRequest {}
 message ListWorkflowsResponse { repeated WorkflowInfo workflows = 1; }

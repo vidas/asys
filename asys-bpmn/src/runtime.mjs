@@ -134,10 +134,15 @@ export class WorkflowRuntime {
     pending.then(cleanup, cleanup);
     return pending;
   }
-  async loadWorkflow({ bpmnXml, workflow }) {
+  async loadWorkflow({ bpmnXml, workflow, workflowJson }) {
     this.ready();
     let artifact;
-    try { artifact = await this.prepare(workflow !== undefined ? flowArtifact(workflow) : await parseWorkflow(bpmnXml)); }
+    try {
+      // A workflow/1 document comes resolved, as an object over the host
+      // channel or as JSON over the Workflow service; otherwise it is BPMN.
+      if (workflow === undefined && workflowJson) workflow = parseJSON(workflowJson, 'Workflow document', { record: true });
+      artifact = await this.prepare(workflow !== undefined ? flowArtifact(workflow) : await parseWorkflow(bpmnXml));
+    }
     catch (error) { fail(error.message); }
     return { workflowId: await this.store.loadWorkflow(artifact) };
   }

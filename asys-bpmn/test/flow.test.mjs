@@ -179,6 +179,22 @@ test('a revision loop runs a step again as new work and sees the latest results'
   assert.equal(new Set(f.jobs().map(job => job.id)).size, 2);
 });
 
+test('steps sharing a result name update one ledger, as BPMN result variables do', async t => {
+  const f = await fixture(t);
+  // Two steps write ledger; the loop reads whichever wrote last.
+  const workflowId = (await f.runtime.loadWorkflow({ workflowJson: JSON.stringify(document({
+    open: { run: 'program', result: 'ledger', input: { count: 1 }, next: 'bump' },
+    bump: { run: 'program', result: 'ledger', input: { count: '${ledger.count + 1}' }, next: 'enough' },
+    enough: { switch: [{ when: 'ledger.count < 3', next: 'bump' }], default: 'done' },
+    done: { end: 'Counted' },
+  })) })).workflowId;
+  await f.runtime.startRun({ environment: 'test', id: 'run', workflowId, variablesJson: '{}' });
+  const run = await finished(f);
+  assert.deepEqual(run.variables.ledger, { count: 3 });
+  assert.deepEqual(run.variables.open, { count: 1 });
+  assert.equal(f.jobs().filter(job => job.activityId === 'bump').length, 2);
+});
+
 test('on_error continues with the failure, and on_timeout cancels the work', async t => {
   const f = await fixture(t);
   await f.start(document({

@@ -190,7 +190,7 @@ export class FlowExecution {
           const target = error.timedOut ? step.on_timeout ?? step.on_error : step.on_error;
           this.stepEvent('step.failed', frame, name, { ...errorRecord(error), next: target ?? null });
           if (!target) throw error;
-          this.setResult(frame, name, { ...(object(error.result) ? error.result : {}), exception: error.message });
+          this.setResult(frame, name, { ...(object(error.result) ? error.result : {}), exception: error.message }, step.result);
           this.advance(frame, target);
           await this.checkpoint();
           continue;
@@ -204,7 +204,7 @@ export class FlowExecution {
           break;
         }
         if ('result' in outcome) {
-          this.setResult(frame, name, outcome.result);
+          this.setResult(frame, name, outcome.result, step.result);
           frame.result = copy(outcome.result);
           if (step.undo) {
             const owner = this.owner(frame);
@@ -690,9 +690,12 @@ export class FlowExecution {
     return Object.assign({}, ...chain.flatMap(current => [this.owner(current).variables, current.locals]));
   }
 
-  setResult(frame, name, value) {
+  /* A result is stored under its step's ID and, with result:, under that
+   * shared name too, which several steps may update. */
+  setResult(frame, name, value, shared) {
     const owner = this.owner(frame);
     owner.variables[name] = copy(value);
+    if (shared) owner.variables[shared] = copy(value);
     if (owner.id === this.state.root) this.record.variables = clone(owner.variables);
   }
 

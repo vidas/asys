@@ -70,7 +70,9 @@ input:
 ```
 
 A step that runs again, as in a revision loop, replaces its result, so later
-steps read the latest one. A called file sees only its inputs and its steps.
+steps read the latest one. When several steps update one value, such as a
+repair budget, give each `result: budget`: the result is also stored under that
+shared name, and readers see whichever step wrote last. A called file sees only its inputs and its steps.
 
 ## Human steps
 

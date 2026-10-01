@@ -144,6 +144,7 @@ Every step has exactly one kind key. These keys may appear on any step:
 | `on_error` | Step to continue at if this step fails. Without it, a failure fails the enclosing group, call or run. |
 | `timeout`, `on_timeout` | ISO 8601 duration and the step to continue at when it elapses; the running work is cancelled. |
 | `undo` | Compensation: a step that reverses this one's effect, run by a `compensate` step. |
+| `result` | A shared name the step's result is also stored under (on steps that have results). Several steps may write one name, such as a budget or ledger carried around repair loops; expressions read whichever wrote last. BPMN's `asys:job result` is the same. |
 | `description` | Text for people and viewers. |
 
 ### `run`: a job
