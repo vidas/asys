@@ -562,6 +562,7 @@ export function startDashboard(document, window) {
     $('#execution-controls').hidden = true;
   }
   function selectRun(id, jobId = null) {
+    if (state.pinnedRun) id = state.pinnedRun; // A dashboard for one run never leaves it.
     state.senateParticipant=null;
     resetSource();state.generation++; state.runId = id; state.jobId = jobId; state.event = null;
     state.job=null;state.inspection=null;state.member=null;state.memberEpoch++;state.consoleSource='job';state.overviewExpanded=false;
@@ -627,6 +628,8 @@ export function startDashboard(document, window) {
   }
   function renderOverview(payload) {
     state.runs = Array.isArray(payload.runs) ? payload.runs : [];
+    state.pinnedRun = typeof payload.run === 'string' ? payload.run : null;
+    $('#close-run').hidden = Boolean(state.pinnedRun);
     const scope = typeof payload.scope === 'string' ? payload.scope : payload.scope?.name ?? payload.scope?.root ?? 'Local systems';
     text($('#scope'), scope);
     const systems = [...new Set(state.runs.map(run => run.system).filter(Boolean))].sort();
@@ -927,6 +930,7 @@ export function startDashboard(document, window) {
       const overview = await api('/api/runs');
       if (generation !== state.generation) return;
       renderOverview(overview);
+      if (state.pinnedRun && state.runId !== state.pinnedRun) { selectRun(state.pinnedRun); return; }
       if (state.runId) {
         const base = `/api/runs/${encodeURIComponent(state.runId)}`;
         const detail = await api(base);

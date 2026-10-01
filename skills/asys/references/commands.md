@@ -65,7 +65,7 @@ asys ps [--json] [--root DIRECTORY]
 asys status [RUN] [--json] [--root DIRECTORY]
 asys logs [RUN] [JOB] [--source SOURCE] [--stream STREAM] [-f] [-n N] [--root DIRECTORY]
 asys top [RUN] [--root DIRECTORY]
-asys dashboard [--port PORT] [--design DIRECTORY] [--root DIRECTORY]
+asys dashboard [--run RUN] [--port PORT] [--design DIRECTORY] [--root DIRECTORY]
 asys skill [DEST] [--name asys|asys-authoring]
 ```
 
@@ -76,6 +76,11 @@ components. With `RUN` it shows that run's jobs and errors.
 `RUN` accepts an ID, unique prefix, `latest`, or saved run directory. `JOB`
 accepts a name, ID or unique prefix. An omitted run selects the latest applicable
 run; `ps` lists saved runs.
+
+`asys dashboard --run RUN` serves one run of the root, resolved once when the
+dashboard starts (an ID, unique prefix or `latest`). Its overview lists only that
+run, and requests for any other run, including execution controls, are refused.
+Controls for the run itself remain available.
 
 Log sources: `run`, `events`, `jobs`, `components`, `commands`. A JOB or stream
 selects `jobs`; streams are `stdout`, `stderr`, `both`. Default output is the

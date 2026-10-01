@@ -216,8 +216,11 @@ def arguments(argv):
     monitor.add_argument('run', nargs='?', metavar='RUN', help=run_help)
 
     board = add_command(commands, 'dashboard', dashboard,
-                        'Open the local dashboard for all systems in this state root',
+                        'Open the local dashboard for all systems in this state root, or for one run',
                         parents=[state], validate=validate_dashboard)
+    board.add_argument('--run', metavar='RUN',
+                       help='show only this run (run ID or unique prefix, or latest); '
+                            'the dashboard serves no other run')
     board.add_argument('--port', type=int, default=0,
                        help='local HTTP port (default: select an available port)')
     board.add_argument('--design', type=Path, metavar='DIRECTORY',

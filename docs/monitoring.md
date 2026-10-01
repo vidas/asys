@@ -8,11 +8,14 @@ asys logs RUN
 asys logs RUN JOB --stream stderr
 asys top RUN
 asys dashboard --root ./state
+asys dashboard --root ./state --run RUN   # this run only
 ```
 
 Every execution shape writes ordinary run/job records. Observation takes the
 same asys `--root` as execution. A root can contain runs from several dcomp
 systems; the dashboard's system filter selects among them and survives refresh.
+`--run` limits a dashboard to one run, resolved when it starts: the server lists
+and serves no other run, and the page opens on it.
 
 The workflow view distinguishes worker kinds, branches and return paths.
 Program tasks expose results and logs. Senate and swarm selections connect to

@@ -135,16 +135,26 @@ def saved_messages(agent, relative, metadata, *, current_turn=False):
 
 
 class DashboardData:
-    def __init__(self, root):
+    def __init__(self, root, run=None):
         self.root = Path(root).expanduser().resolve()
         self.runs = Runs(state_root('runs', root=self.root))
         self.histories = {}
         self.transcripts = {}
+        # A dashboard for one run resolves it once, so "latest" or a prefix
+        # cannot later select another run; every endpoint enforces the scope.
+        self.run_id = None
+        if run is not None:
+            directory = self.runs.select(run)
+            if directory.parent != self.runs.root:
+                raise ValueError(f'Run {run!r} is not saved in this state root')
+            self.run_id = directory.name
 
     def run_directory(self, identity):
         # HTTP selectors never accept arbitrary filesystem paths or prefixes.
         if not identity or identity in {'.', '..'} or '/' in identity or '\\' in identity:
             raise ValueError('Expected a full run ID')
+        if self.run_id is not None and identity != self.run_id:
+            raise FileNotFoundError('Run is unavailable in this dashboard')
         path = contained(self.runs.root, identity)
         if not (path / 'run.json').is_file():
             raise FileNotFoundError('Run is unavailable in this state root')
@@ -165,7 +175,8 @@ class DashboardData:
 
     def overview(self):
         rows = []
-        for directory in self.runs.directories():
+        directories = self.runs.directories() if self.run_id is None else [self.runs.root / self.run_id]
+        for directory in directories:
             try:
                 record = self.runs.snapshot(directory)
                 jobs = record.pop('jobs')
@@ -177,7 +188,7 @@ class DashboardData:
             except (OSError, ValueError, KeyError) as error:
                 rows.append({'id': directory.name, 'name': directory.name, 'status': 'unavailable',
                              'error': str(error), 'jobs': {'total': 0, 'active': 0}})
-        return {'scope': str(self.root), 'runs': rows}
+        return {'scope': str(self.root), 'runs': rows, 'run': self.run_id}
 
     def run(self, identity):
         directory = self.run_directory(identity)
@@ -635,8 +646,8 @@ class DashboardData:
 
 
 class Dashboard:
-    def __init__(self, root, *, port=0, design=None):
-        self.data = DashboardData(root)
+    def __init__(self, root, *, port=0, design=None, run=None):
+        self.data = DashboardData(root, run)
         self.design = Design(design)
         self.lock = threading.RLock()
         dashboard = self
@@ -771,8 +782,9 @@ class Dashboard:
 
 
 def dashboard(args):
-    viewer = Dashboard(args.root, port=args.port, design=args.design).start()
-    print(f'Dashboard: {viewer.url}\nState: {viewer.data.root}\nPress Ctrl-C to close the dashboard.', flush=True)
+    viewer = Dashboard(args.root, port=args.port, design=args.design, run=getattr(args, 'run', None)).start()
+    scope = f'\nRun: {viewer.data.run_id}' if viewer.data.run_id else ''
+    print(f'Dashboard: {viewer.url}\nState: {viewer.data.root}{scope}\nPress Ctrl-C to close the dashboard.', flush=True)
     try:
         viewer.thread.join()
     finally:

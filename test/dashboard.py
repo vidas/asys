@@ -549,6 +549,75 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(request('POST', base + '/control', '{"action":"pause"}',
             {'Content-Type': 'application/json'})[0], 202)
 
+    def other_run(self):
+        other = self.root / 'runs/other-run'
+        save(other / 'run.json', {'id': 'other-run', 'name': 'Unrelated', 'system': 'experiment',
+            'environment': 'lab', 'status': 'running'})
+        queue = other / 'runtime/environments/lab/jobs/other-1'
+        save(queue / 'request.json', {'id': 'other-1', 'type': 'check', 'directory': '../../../jobs/other-1',
+            'workspace': '../../../workspace', 'metadata': {'name': 'Check', 'environment': 'lab'}})
+        save(queue / 'state.json', {'id': 'other-1', 'type': 'check', 'status': 'running'})
+        save(other / 'jobs/other-1/worker.json', {'kind': 'program'})
+        return other
+
+    def test_run_scope_resolves_once_and_serves_no_other_run(self):
+        other = self.other_run()
+        os.utime(other / 'run.json', (1, 1))  # workflow-run is now the latest run
+        data = DashboardData(self.root, 'workflow')
+        self.assertEqual(data.run_id, 'workflow-run')
+        overview = data.overview()
+        self.assertEqual(overview['run'], 'workflow-run')
+        self.assertEqual([row['id'] for row in overview['runs']], ['workflow-run'])
+        self.assertEqual(data.run('workflow-run')['run']['id'], 'workflow-run')
+        self.assertEqual(data.job('workflow-run', 'child-1')['job']['id'], 'child-1')
+        for read in (lambda: data.run('other-run'), lambda: data.job('other-run', 'other-1'),
+                     lambda: data.control('other-run', 'other-1', 'cancel')):
+            with self.assertRaisesRegex(FileNotFoundError, 'unavailable in this dashboard'):
+                read()
+        latest = DashboardData(self.root, 'latest')
+        self.assertEqual(latest.run_id, 'workflow-run')
+        os.utime(other / 'run.json')  # a newer run does not move an open dashboard
+        self.assertEqual([row['id'] for row in latest.overview()['runs']], ['workflow-run'])
+        self.assertIsNone(DashboardData(self.root).overview()['run'])
+        self.assertEqual(len(DashboardData(self.root).overview()['runs']), 2)
+
+    def test_run_scope_rejects_unknown_ambiguous_and_foreign_runs(self):
+        self.other_run()
+        with self.assertRaisesRegex(ValueError, 'No run matching'):
+            DashboardData(self.root, 'missing')
+        save(self.root / 'runs/workflow-two/run.json', {'id': 'workflow-two', 'status': 'completed'})
+        with self.assertRaisesRegex(ValueError, 'Ambiguous run'):
+            DashboardData(self.root, 'workflow')
+        foreign = self.root / 'elsewhere/foreign-run'
+        save(foreign / 'run.json', {'id': 'foreign-run', 'status': 'completed'})
+        with self.assertRaisesRegex(ValueError, 'not saved in this state root'):
+            DashboardData(self.root, str(foreign))
+
+    def test_http_run_scope_refuses_other_runs_and_their_controls(self):
+        self.other_run()
+        server = Dashboard(self.root, run='workflow-run').start()
+        self.addCleanup(server.close)
+        def request(method, path, body=None, headers=None):
+            connection = http.client.HTTPConnection('127.0.0.1', server.port)
+            connection.request(method, path, body=body, headers=headers or {})
+            response = connection.getresponse()
+            data = response.read()
+            connection.close()
+            return response.status, data
+        status, body = request('GET', '/api/runs')
+        self.assertEqual(status, 200)
+        overview = json.loads(body)
+        self.assertEqual((overview['run'], [row['id'] for row in overview['runs']]), ('workflow-run', ['workflow-run']))
+        self.assertEqual(request('GET', '/api/runs/workflow-run')[0], 200)
+        self.assertEqual(request('GET', '/api/runs/workflow-run/jobs/child-1')[0], 200)
+        self.assertEqual(request('GET', '/api/runs/other-run')[0], 404)
+        self.assertEqual(request('GET', '/api/runs/other-run/jobs/other-1')[0], 404)
+        self.assertEqual(request('GET', '/api/runs/other-run/jobs/other-1/transcripts')[0], 404)
+        self.assertEqual(request('POST', '/api/runs/other-run/jobs/other-1/control', '{"action":"cancel"}',
+            {'Content-Type': 'application/json'})[0], 404)
+        state = self.root / 'runs/other-run/runtime/environments/lab/jobs/other-1/state.json'
+        self.assertEqual(json.loads(state.read_text())['status'], 'running')
+
     def world_artifact(self, contents='(board "saved Ω")\n'.encode()):
         record = json.loads((self.run / 'run.json').read_text())
         save(self.run / 'run.json', {**record, 'world_components': {
