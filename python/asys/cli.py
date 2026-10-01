@@ -37,6 +37,11 @@ def check_workflow(args):
         raise SystemExit(1)
 
 
+def serve_workflows(args):
+    from .flow_service import serve
+    serve()
+
+
 def system_or_run_status(args):
     return status(args) if args.run else overview(args)
 
@@ -120,6 +125,8 @@ def arguments(argv):
     checking.add_argument('--environment', type=Path, metavar='DIRECTORY',
                           help='also check worker types, program arguments and human forms against this environment')
     checking.add_argument('--json', action='store_true', help='print problems as a JSON list')
+    add_command(operations, 'serve', serve_workflows,
+                'Edit workflows through JSON requests on stdin, one per line (used by viewers)')
 
     guide = add_command(commands, 'skill', skill,
                         'Locate or export the operating and authoring skills', validate=validate_skill)

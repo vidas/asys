@@ -92,7 +92,7 @@ FORM = {'type': 'object', 'properties': {
     'comments': {'type': 'string'}}, 'required': ['action']}
 
 
-class FlowTests(unittest.TestCase):
+class Fixture(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix='asys-flow-')
         self.addCleanup(temporary.cleanup)
@@ -118,6 +118,8 @@ class FlowTests(unittest.TestCase):
         workflow = flow.load_all(self.write(text))
         return [problem['message'] for problem in flow.check(workflow, self.environment)]
 
+
+class FlowTests(Fixture):
     def test_a_complete_workflow_with_a_call_and_a_form_is_valid(self):
         workflow = flow.load_all(self.write(WORKFLOW))
         self.assertEqual([str(p) for p in flow.check(workflow, self.environment)], [])
@@ -171,6 +173,69 @@ class FlowTests(unittest.TestCase):
                                        'call: workflow.yaml\n    input: {request: "${request}"}'), 'review-loop.yaml')
         workflow = flow.load_all(self.write(WORKFLOW))
         self.assertIs(workflow.calls['review-loop.yaml'].calls['workflow.yaml'], workflow)
+
+
+class LayoutAndServiceTests(Fixture):
+    def test_the_graph_lays_out_branches_groups_and_loops(self):
+        from asys import flow_layout
+        graph = flow_layout.graph(flow.load_all(self.write(WORKFLOW)), flow.worker_kinds(self.environment))
+        nodes = {node['id']: node for node in graph['nodes']}
+        self.assertEqual(nodes['search/global_search']['scope'], 'search')
+        self.assertEqual((nodes['implement']['work'], nodes['question']['work'], nodes['evidence']['work']),
+                         ('goal', 'human', 'program'))
+        # Branches share a column; the join comes after the widest branch.
+        self.assertEqual(nodes['search']['x'], nodes['implement']['x'])
+        self.assertGreater(nodes['evidence']['x'], nodes['search']['x'] + nodes['search']['w'])
+        inside = nodes['search/global_search']
+        self.assertTrue(nodes['search']['x'] < inside['x'] < nodes['search']['x'] + nodes['search']['w'])
+        roles = {(edge['from'], edge['to']): edge for edge in graph['edges']}
+        self.assertTrue(roles[('revise', 'evidence')].get('back'))
+        self.assertEqual(roles[('decide', 'revise')]['label'], 'question.action = "revise"')
+        self.assertEqual(roles[('question', 'stopped')]['role'], 'timeout')
+
+    def test_a_broken_workflow_still_lays_out_so_it_can_be_fixed(self):
+        from asys import flow_layout
+        broken = WORKFLOW.replace('next: question\n  question:', 'next: nowhere\n  question:').replace('start: brief', 'start: gone')
+        graph = flow_layout.graph(flow.load_all(self.write(broken)))
+        self.assertIn('review', {node['id'] for node in graph['nodes']})
+        self.assertNotIn('nowhere', {edge['to'] for edge in graph['edges']})
+
+    def test_the_service_edits_keep_comments_and_undo_restores(self):
+        import io
+        from asys.flow_service import serve
+        path = self.write(WORKFLOW)
+        requests = [
+            {'id': 1, 'op': 'load', 'file': str(path), 'environment': str(self.environment)},
+            {'id': 2, 'op': 'set', 'step': 'brief', 'key': 'input.request', 'value': 'Write a sharper brief.'},
+            {'id': 3, 'op': 'rename', 'step': 'evidence', 'to': 'measure'},
+            {'id': 4, 'op': 'add', 'scope': 'search', 'name': 'compare_routes',
+             'step': {'run': 'compare', 'input': {'request': 'Compare.'}}},
+            {'id': 5, 'op': 'connect', 'step': 'search/local_search', 'key': 'next', 'to': 'compare_routes'},
+            {'id': 6, 'op': 'connect', 'step': 'brief', 'key': 'next', 'to': 'absent'},
+            {'id': 7, 'op': 'undo'},
+            {'id': 8, 'op': 'save'},
+            {'id': 9, 'op': 'remove', 'step': 'handover'},
+        ]
+        output = io.StringIO()
+        serve(io.StringIO(''.join(json.dumps(request) + '\n' for request in requests)), output)
+        responses = {response['id']: response for response in map(json.loads, output.getvalue().splitlines())}
+        self.assertEqual(responses[1]['problems'], [])
+        self.assertIn('Write a sharper brief.', responses[2]['text'])
+        self.assertIn('# comments survive loading', responses[2]['text'])
+        # Renaming updates every reference, including the join and the loop.
+        self.assertIn('join: measure', responses[3]['text'])
+        self.assertIn('next: measure', responses[3]['text'])
+        self.assertNotIn('evidence:', responses[3]['text'])
+        self.assertEqual(responses[5]['problems'], [])
+        self.assertEqual((responses[6]['ok'], responses[6]['error']), (False, 'absent is not a step of this scope'))
+        # The failed connect left no history, so undo reverts the connect before it.
+        local_search = responses[7]['text'].split('local_search:')[1].split('compare_routes:')[0]
+        self.assertNotIn('next: compare_routes', local_search)
+        self.assertIn('compare_routes:', responses[7]['text'])
+        self.assertTrue(responses[7]['canRedo'])
+        self.assertFalse(responses[8]['dirty'])
+        self.assertEqual(path.read_text(), responses[8]['text'])
+        self.assertEqual((responses[9]['ok'], responses[9]['error']), (False, 'no step handover'))
 
 
 if __name__ == '__main__':

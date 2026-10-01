@@ -148,6 +148,28 @@ def expression_names(expression):
     return names
 
 
+def rename_name(expression, old, new):
+    """EXPRESSION reading NEW wherever it read the root name OLD."""
+    pieces = re.split(r'("(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\')', expression)
+    pattern = re.compile(rf'(?<![\w.]){re.escape(old)}\b(?!\s*\()')
+    return ''.join(piece if index % 2 else pattern.sub(new, piece) for index, piece in enumerate(pieces))
+
+
+def rename_in_value(value, old, new, *, bare=False):
+    """Rename a step's references in a field: `${...}` in text, or a bare expression."""
+    if isinstance(value, str):
+        if bare and not INTERPOLATION.search(value):
+            return rename_name(value, old, new)
+        return INTERPOLATION.sub(lambda match: '${' + rename_name(match.group(1), old, new) + '}', value)
+    if isinstance(value, dict):
+        for key in value:
+            value[key] = rename_in_value(value[key], old, new)
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            value[index] = rename_in_value(item, old, new)
+    return value
+
+
 def interpolations(value):
     """Every `${...}` expression inside a string, or nested in lists and maps."""
     if isinstance(value, str):
