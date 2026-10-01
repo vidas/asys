@@ -411,6 +411,30 @@ class ConvertTests(unittest.TestCase):
         self.assertEqual(_value('count(items) + 1'), '${count(items) + 1}')
 
 
+class ConvertCommandTests(unittest.TestCase):
+    def test_a_project_is_converted_beside_its_bpmn_and_the_rest_is_listed(self):
+        import contextlib
+        import io
+        import shutil
+        from asys.flow_migrate import main
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory) / 'project'
+            (project / 'tests').mkdir(parents=True)
+            shutil.copy(ROOT / 'asys-bpmn/test/fixtures/named-swarm.bpmn', project / 'workflow.bpmn')
+            shutil.copy(ROOT / 'asys-bpmn/examples/hello/workflow.bpmn', project / 'tests/scripted.bpmn')
+            (project / 'README.md').write_text('Run asys-run env workflow.bpmn.\n')
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                status = main([str(project)])
+            text = output.getvalue()
+            self.assertEqual(status, 1)                          # the scripted one cannot convert
+            self.assertTrue((project / 'workflow.yaml').is_file())
+            self.assertFalse((project / 'tests/scripted.yaml').exists())
+            self.assertIn('runs an inline script', text)
+            self.assertIn('README.md: line 1', text)
+            self.assertTrue((project / 'workflow.bpmn').is_file())  # the BPMN stays
+
+
 class JournalTests(unittest.TestCase):
     def test_asys_logs_reports_workflow_file_steps_like_bpmn_activities(self):
         from asys.workflow_journal import WorkflowHistory

@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+"""Convert BPMN workflows to workflow files (asys: workflow/1)."""
+from pathlib import Path
+import sys
+
+executable = Path(__file__).resolve()
+root = executable.parents[1]
+for directory in (root / 'share/asys/vendor', root / '.host-deps', root / 'asys-runtime', root / 'asys-workers',
+                  root / 'share/asys/python', root / 'python'):
+    if directory.is_dir():
+        sys.path.insert(0, str(directory))
+from asys.flow_migrate import main
+
+if __name__ == '__main__':
+    sys.exit(main())

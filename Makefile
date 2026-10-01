@@ -11,7 +11,7 @@ NPM ?= npm
 export PREFIX DESTDIR
 
 JS_PACKAGES := $(patsubst %/package.json,%,$(wildcard asys-inference/components/protocol/*/package.json asys-inference/components/*/package.json)) asys-workers asys-bpmn asys-human-interface
-HOST_TOOLS := asys asys-run asys-workers asys-environment
+HOST_TOOLS := asys asys-run asys-workers asys-environment asys-bpmn-convert
 REMOVED_HOST_TOOLS := asys-oneshot asys-goal asys-senate asys-swarm asys-bpmn
 REMOVED_HOST_MODULES := oneshot goal senate swarm swarm_view
 
