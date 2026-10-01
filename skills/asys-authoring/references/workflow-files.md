@@ -81,15 +81,20 @@ A `run` of the environment's human type takes `title`, `prompt`, `summary`,
 workflow. A `switch` comparing an answer with a literal must use a value the
 form allows; `asys workflow check` reports it otherwise.
 
-## Seeing and editing
+## Seeing, editing and running
 
 `asys-flow-view [-environment dir] workflow.yaml` (the environment defaults to
-`$ASYS_ENVIRONMENT_DIR`, as for `asys workflow check`) shows and edits the file on
-X11; `asys-flow-view -run run` follows a run. Edits keep comments and order.
+`$ASYS_ENVIRONMENT_DIR`, as for `asys workflow check`) shows the workflow on
+X11, edits it while keeping comments and order, and starts runs of the saved
+file (Ctrl+R), each in a window that follows it live; `asys-flow-view -run
+RUN` follows any run. See `asys-flow-view(1)`.
 
 ## From BPMN
 
-`asys workflow convert workflow.bpmn -o workflow.yaml` writes the equivalent
+`asys-bpmn-convert DIRECTORY` converts every BPMN workflow of a project to a
+workflow file beside it, validates it, and lists the files that still mention
+BPMN (tests, docs) for you to change; the BPMN keeps running meanwhile.
+`asys workflow convert workflow.bpmn -o workflow.yaml` converts one file and writes the equivalent
 file for everything that has one: tasks, flows, gateways, subprocesses,
 coordinators, message and timer waits, loops, compensation, and error and timer
 boundary events. It refuses what a workflow file cannot express, saying why:

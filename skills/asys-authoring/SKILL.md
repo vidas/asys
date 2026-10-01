@@ -62,8 +62,12 @@ Obtain actual human answers; deterministic test answers are fixture data only.
 - [Workers](references/workers.md): agent, goal, Senate and swarm definitions.
 - [Workflow files](references/workflow-files.md): the YAML format, steps,
   expressions, human steps, the viewer, and converting BPMN.
-- [BPMN workflows](references/workflows.md) and [advanced BPMN](references/advanced-workflows.md):
+- [Advanced workflows](references/advanced-workflows.md): revision loops and
+  shared results, collections, parallel work, coordinators, calls, failure,
+  time, compensation, messages and embedding.
+- [BPMN workflows](references/workflows.md) and [advanced BPMN](references/bpmn-advanced.md):
   the earlier format, which still runs; prefer workflow files for new work.
+  `asys-bpmn-convert DIRECTORY` moves a project's BPMN to workflow files.
 - [Human help](references/human.md): briefings, forms and revision paths.
 - [Worlds](references/worlds.md): packages, evaluators, protocols and viewers.
 - [Dashboard designs](references/design.md): design document to shared CSS,

@@ -13,7 +13,8 @@ installed bundle:
 asys_authoring_dir=$(asys skill --name asys-authoring)
 cp -R "$asys_authoring_dir/assets/team" ./report-team
 mkdir -p ./report-workspace
-asys-run ./report-team/env/dummy ./report-team/workflow.bpmn \
+asys workflow check ./report-team/workflow.yaml --environment ./report-team/env/dummy
+asys-run ./report-team/env/dummy ./report-team/workflow.yaml \
   --input ./report-team/request.md --workspace ./report-workspace
 asys status latest
 ```

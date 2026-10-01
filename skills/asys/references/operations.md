@@ -54,7 +54,7 @@ support alternative designs.
 ```sh
 asys-human-prompt
 asys-human-prompt --root ./state --system asys --once
-asys-run ENVIRONMENT workflow.bpmn --input request.md --human
+asys-run ENVIRONMENT workflow.yaml --input request.md --human
 ```
 
 The shared Human service queues requests even without a terminal. One terminal
@@ -103,7 +103,7 @@ asys-run --upgrade RUN
 ```
 
 Select the run's state directory with its project's `asys-env`, or pass
-`--root DIRECTORY`. The saved workspace, BPMN definition, environment location,
+`--root DIRECTORY`. The saved workspace, workflow definition, environment location,
 connections, system/dcomp settings and system-model defaults are retained.
 The environment is rebuilt from that saved location using installed base
 images; an environment without a Dockerfile uses its configured image.
@@ -149,7 +149,7 @@ asys-run --resume RUN
 ```
 
 Correct the cause first: tools, configuration, inputs, component availability or
-a domain check. Resume uses saved BPMN, workspace, environment location, system
+a domain check. Resume uses the saved workflow, workspace, environment location, system
 and dcomp settings. It can rebuild an environment after a tool fix. Replacement
 jobs get new IDs; failed job evidence remains.
 

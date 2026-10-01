@@ -5,7 +5,8 @@ description: Run and inspect asys workers and workflows, configure inference and
 
 # Operate asys
 
-Public execution goes through `asys-run`, including BPMN workflows. Component
+Public execution goes through `asys-run`, including workflow files (`.yaml`)
+and BPMN workflows. Component
 names such as `asys-bpmn` identify implementation packages, not separate host
 launch commands. Use the installed command help and these bundled references.
 
@@ -29,7 +30,7 @@ several systems in one state directory.
 asys-workers list ENVIRONMENT
 asys-workers describe ENVIRONMENT WORKER
 asys-run ENVIRONMENT WORKER "Assignment" --workspace PROJECT
-asys-run ENVIRONMENT workflow.bpmn --input request.md --workspace PROJECT
+asys-run ENVIRONMENT workflow.yaml --input request.md --workspace PROJECT
 asys status latest
 asys logs latest
 asys dashboard

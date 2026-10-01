@@ -2,12 +2,12 @@
 
 asys runs AI agents, ordinary programs and people together on a real project.
 A single agent can take an assignment; a goal can be implemented and then checked
-by an independent verifier; a group of agents can deliberate; and a BPMN
+by an independent verifier; a group of agents can deliberate; and a
 workflow can combine all of these with parallel steps, human decisions and
 revision. Each run is recorded, so you can follow it while it works and see
 afterwards what was done and why.
 
-[Install](INSTALL.md) · [Start](#03--start) · [Workflows](skills/asys-authoring/references/workflows.md) · [Workers](skills/asys-authoring/references/workers.md) · [Operations](skills/asys/references/operations.md) · [Release notes](CHANGELOG.md)
+[Install](INSTALL.md) · [Start](#03--start) · [Workflows](skills/asys-authoring/references/workflow-files.md) · [Workers](skills/asys-authoring/references/workers.md) · [Operations](skills/asys/references/operations.md) · [Release notes](CHANGELOG.md)
 
 - Jobs work in your project directory; logs, transcripts and reports are kept
   apart, in the run's record.
@@ -35,7 +35,9 @@ The workflow decides what happens next: accept the result, send it back for
 another revision, or stop. Workers only carry out their assignment, with the
 tools installed in their environment. Agents use the Pi coding-agent SDK,
 programs run commands, and human steps wait for an answer. Workflows are
-standard BPMN 2.0 XML with a small execution binding.
+short YAML files whose steps name the environment's workers and carry no code;
+`asys-flow-view` draws, edits and runs them on X11. BPMN 2.0 workflows still
+run, and `asys-bpmn-convert` moves them to workflow files.
 
 ## 02 · Kinds of work
 
@@ -66,7 +68,7 @@ check that execution works with the bundled workflow. It needs no model account:
 make install
 asys init ./state
 source ./state/asys-env
-asys-run asys-bpmn/examples/hello/env/dummy asys-bpmn/examples/hello/workflow.bpmn
+asys-run asys-bpmn/examples/hello/env/dummy asys-bpmn/examples/hello/workflow.yaml
 asys logs latest
 ```
 
@@ -92,7 +94,7 @@ asys dashboard
 A workflow uses the same environment with a request file:
 
 ```sh
-asys-run ./env/development ./workflow.bpmn --input request.md --workspace ./project
+asys-run ./env/development ./workflow.yaml --input request.md --workspace ./project
 ```
 
 Human steps are answered from another terminal with `asys-human-prompt`.
