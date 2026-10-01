@@ -130,7 +130,6 @@ export class FlowExecution {
     const root = this.document.files[this.document.root].data;
     this.state = { sequence: 0, frames: {} };
     this.state.root = this.frame(null, { file: this.document.root, path: [] }, root.start, this.record.variables).id;
-    this.event('run.started');
     this.drive();
   }
 
@@ -397,7 +396,10 @@ export class FlowExecution {
         signal.addEventListener('abort', () => { this.unwait(step.wait, waiter); reject(signal.reason); }, { once: true });
         const pending = Object.entries(this.record.messages).find(([, message]) => !message.applied && message.target === step.wait);
         if (pending) this.deliver(pending[0]);
-        else this.schedule();
+        else {
+          this.stepEvent('step.waiting', frame, state.name, { reason: `message ${step.wait}` });
+          this.schedule();
+        }
       });
     }
     return copy(state.message);
@@ -428,6 +430,7 @@ export class FlowExecution {
     await this.checkpoint();
     const remaining = frame.step.until - Date.now();
     if (remaining <= 0) return;
+    this.stepEvent('step.waiting', frame, frame.step.name, { reason: `timer until ${new Date(frame.step.until).toISOString()}` });
     this.idle++;
     this.schedule();
     try { await sleep(remaining, undefined, { signal: this.stepSignal(frame) }); }

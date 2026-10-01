@@ -14,6 +14,11 @@ def agent_notices(notices):
         yield notice["key"], clean(f"{when}  {notice['status'].upper():<9} {label} — {notice['detail']}")
 
 
+# Workflow file step events, as the BPMN activity events they correspond to.
+STEP_EVENTS = {"step.started": "activity.start", "step.completed": "activity.end", "step.waiting": "activity.wait",
+               "step.failed": "step.failed"}
+
+
 class WorkflowHistory:
     def __init__(self, directory=None):
         self.directory = Path(directory) if directory else None
@@ -54,6 +59,12 @@ class WorkflowHistory:
         activity = event.get("activityId", "")
         when = event.get("time", "")
         execution = data.get("executionId")
+        if kind in STEP_EVENTS:
+            # Workflow files report steps as BPMN reports activities. One frame
+            # runs one execution of a step at a time.
+            kind, execution = STEP_EVENTS[kind], f"{data.get('frame', '')}:{activity}"
+            if data.get("file") and data["file"] != record.get("workflow_root", data["file"]):
+                activity = f"{data['file']}:{activity}"
         jobs = record.get("jobs", [])
         job = next((job for job in jobs if data.get("jobId") == job["id"] or
                     (execution and execution == job.get("execution_id"))), None)
@@ -102,6 +113,8 @@ class WorkflowHistory:
             reason = "human response" if kind == "job.created" else "message" if data.get("activityType") == "bpmn:ReceiveTask" else "event"
             if kind == "activity.timer":
                 reason = "timer" + (f" until {data['expireAt']}" if data.get("expireAt") else "")
+            if data.get("reason"):
+                reason = data["reason"]
             detail = f"waiting for {reason}"
             if not stage:
                 stage = self.executions.setdefault(key, {"activity": activity, "label": label})
@@ -122,6 +135,15 @@ class WorkflowHistory:
             if kind == "activity.end" and stage and stage.get("started_at"):
                 detail = duration(stage["started_at"], when)
             return emit(state.upper(), label, detail)
+        if kind == "step.failed":
+            self.last_error = data.get("message", "")
+            reported = stage and stage.get("status") == "failed"  # its job's failure was reported
+            if stage:
+                stage["status"] = "failed"
+            if reported:
+                return None
+            routed = f"; continuing at {data['next']}" if data.get("next") else ""
+            return emit("FAILED", label, self.last_error + routed)
         if kind == "message.received":
             return emit("RECEIVED", f"message for {data.get('target', '')}")
         return None

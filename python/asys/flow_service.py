@@ -13,6 +13,11 @@ Requests (`id` is echoed back):
   {"op": "rename", "step": PATH, "to": NAME}
   {"op": "connect", "step": PATH, "key": "next"|"on_error"|..., "to": NAME}
   {"op": "undo"} {"op": "redo"} {"op": "save"} {"op": "check"}
+
+Following a run (read-only; the graph is the run's saved document):
+  {"op": "open", "run": DIRECTORY|ID, "root": STATE?}   graph, run status, step states
+  {"op": "poll"}                                         run status, step states
+  {"op": "step", "step": PATH}                           the step's jobs, results and logs
 """
 import io
 import json
@@ -20,6 +25,7 @@ from pathlib import Path
 import sys
 
 from . import flow, flow_layout
+from .flow_runs import RunView
 
 TARGET_KEYS = {'next', 'on_error', 'on_timeout', 'join', 'default', 'undo'}
 
@@ -31,6 +37,7 @@ class EditError(ValueError):
 class Session:
     def __init__(self):
         self.workflow = None
+        self.run = None           # a run being followed, instead of or beside a file
         self.environment = None
         self.kinds = None
         self.saved = None
@@ -117,11 +124,20 @@ class Session:
         # Results are read by name everywhere the step is visible: this scope,
         # the groups inside it, and the file's output.
         for _, other in flow._all_steps(steps):
-            for key in ('input', 'for_each'):
+            for key in ('input', 'args', 'for_each'):
                 if key in other:
                     other[key] = flow.rename_in_value(other[key], name, to)
             if 'until' in other:
                 other['until'] = flow.rename_in_value(other['until'], name, to, bare=True)
+            choose = other.get('choose')
+            if isinstance(choose, dict):
+                if 'input' in choose:
+                    choose['input'] = flow.rename_in_value(choose['input'], name, to)
+                if 'until' in choose:
+                    choose['until'] = flow.rename_in_value(choose['until'], name, to, bare=True)
+            repeat = other.get('repeat')
+            if isinstance(repeat, dict) and 'until' in repeat:
+                repeat['until'] = flow.rename_in_value(repeat['until'], name, to, bare=True)
             for case in other.get('switch') or []:
                 if isinstance(case, dict) and 'when' in case:
                     case['when'] = flow.rename_in_value(case['when'], name, to, bare=True)
@@ -231,6 +247,13 @@ class Session:
 
 def handle(session, request):
     op = request.get('op')
+    if op == 'open':
+        session.run = RunView(request['run'], request.get('root'))
+        return {'graph': session.run.graph(), **session.run.poll()}
+    if op in {'poll', 'step'}:
+        if session.run is None:
+            raise EditError('open a run first')
+        return session.run.poll() if op == 'poll' else session.run.step(request['step'])
     if op == 'load':
         session.load(request['file'], request.get('environment'))
     elif session.workflow is None:

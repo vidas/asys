@@ -16,6 +16,7 @@ sys.path.insert(0, str(WORKSPACE / "asys-runtime"))
 from asys_runtime import release
 BPMN_IMAGE = os.environ.get("ASYS_BPMN_IMAGE") or release.image("asys-bpmn")[0]
 WORKERS_IMAGE = os.environ.get("ASYS_WORKERS_IMAGE") or release.image("asys-workers")[0]
+HUMAN_IMAGE = os.environ.get("ASYS_HUMAN_IMAGE") or release.image("asys-human-interface")[0]
 sys.path.insert(0, str(ROOT / 'test'))
 from launcher import check_launcher
 sys.path.insert(0, str(WORKSPACE / 'test-support'))
@@ -104,6 +105,21 @@ def main():
             manifest = agent_environment / "component.dcomp"
             manifest.write_text(manifest.read_text().replace("docker asys-env-default\n", f"docker {environment_tag}\n"))
             run(["docker"], "build", "-t", environment_tag, str(agent_environment))
+            # The hello example builds on this release's workers image, as
+            # asys-run would build it.
+            dummy_environment = temp / "dummy"
+            shutil.copytree(ROOT / 'examples/hello/env/dummy', dummy_environment)
+            dockerfile = dummy_environment / "Dockerfile"
+            dockerfile.write_text(dockerfile.read_text().replace("FROM asys-workers\n", f"FROM {WORKERS_IMAGE}\n"))
+            dummy_tag = f"asys-bpmn-dummy-test:{temp.name}"
+            tags.append(dummy_tag)
+            (dummy_environment / "component.dcomp").write_text(f"docker {dummy_tag}\n")
+            run(["docker"], "build", "-t", dummy_tag, str(dummy_environment))
+            human_component = temp / "human-component"
+            human_component.mkdir()
+            manifest = (WORKSPACE / 'asys-human-interface/component.dcomp').read_text()
+            (human_component / "component.dcomp").write_text(
+                manifest.replace("docker asys-human-interface\n", f"docker {HUMAN_IMAGE}\n"))
             engine = temp / "engine"
             engine.mkdir()
             (engine / "component.dcomp").write_text(f"docker {BPMN_IMAGE}\noutput asys.workflow.v1.Workflow workflow\n")
@@ -117,10 +133,10 @@ def main():
             system_file.write_text(f"""system {system}
 component provider {fixture}
 component workers {agent_environment}
-component dummy {ROOT / 'examples/hello/env/dummy'}
+component dummy {dummy_environment}
 component workflow {engine}
 component client {client}
-component human {WORKSPACE / 'asys-human-interface'}
+component human {human_component}
 user provider {os.getuid()}:{os.getgid()}
 user workers {os.getuid()}:{os.getgid()}
 user dummy {os.getuid()}:{os.getgid()}

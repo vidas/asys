@@ -269,5 +269,52 @@ class LayoutAndServiceTests(Fixture):
         self.assertEqual((responses[9]['ok'], responses[9]['error']), (False, 'no step handover'))
 
 
+class RunViewTests(Fixture):
+    def test_a_run_shows_its_saved_graph_step_states_and_jobs(self):
+        from asys.flow_service import Session, handle
+        run = self.root / 'runs/0123456789abcdef0123456789abcdef'
+        (run / 'workflow').mkdir(parents=True)
+        (run / 'workflow/workflow.json').write_text(json.dumps(flow.resolved(flow.load_all(self.write(WORKFLOW)))))
+        (run / 'run.json').write_text(json.dumps({'id': run.name, 'name': 'Delivery', 'status': 'running',
+                                                  'environment_directory': str(self.environment)}))
+        events = [
+            (1, 'step.started', 'brief', {'frame': 'f1', 'file': 'workflow.yaml', 'visit': 1}),
+            (2, 'step.completed', 'brief', {'frame': 'f1', 'file': 'workflow.yaml'}),
+            (3, 'step.started', 'work', {'frame': 'f1', 'file': 'workflow.yaml', 'visit': 1}),
+            (4, 'step.started', 'search/global_search', {'frame': 'f3', 'file': 'workflow.yaml', 'visit': 1}),
+            (5, 'step.failed', 'implement', {'frame': 'f2', 'file': 'workflow.yaml'}),
+            (6, 'step.started', 'review', {'frame': 'f9', 'file': 'review-loop.yaml', 'visit': 1}),
+        ]
+        (run / 'events.jsonl').write_text(''.join(json.dumps({'sequence': sequence, 'type': kind, 'activityId': step,
+                                                              'time': 't', 'data': data}) + '\n'
+                                                  for sequence, kind, step, data in events))
+        session = Session()
+        opened = handle(session, {'op': 'open', 'run': str(run)})
+        self.assertIn('search/global_search', {node['id'] for node in opened['graph']['nodes']})
+        self.assertEqual(opened['run']['name'], 'Delivery')
+        states = {step: value['state'] for step, value in opened['states'].items()}
+        self.assertEqual(states, {'brief': 'done', 'work': 'running', 'search/global_search': 'running', 'implement': 'failed'})
+        # A called file's steps are not this file's: its call step stands for them.
+        self.assertEqual(handle(session, {'op': 'step', 'step': 'review'})['state']['state'], 'waiting')
+        self.assertEqual(handle(session, {'op': 'step', 'step': 'brief'})['jobs'], [])
+
+
+class JournalTests(unittest.TestCase):
+    def test_asys_logs_reports_workflow_file_steps_like_bpmn_activities(self):
+        from asys.workflow_journal import WorkflowHistory
+        history, record = WorkflowHistory(), {'id': 'r', 'name': 'Hello', 'jobs': [], 'workflow_root': 'main.yaml'}
+        events = [
+            ('step.started', 'greet', {'frame': 'f1', 'file': 'main.yaml', 'visit': 1}),
+            ('step.completed', 'greet', {'frame': 'f1', 'file': 'main.yaml'}),
+            ('step.waiting', 'pause', {'frame': 'f1', 'file': 'main.yaml', 'reason': 'timer until noon'}),
+            ('step.failed', 'check', {'frame': 'f7', 'file': 'review.yaml', 'message': 'boom', 'next': 'report'}),
+        ]
+        lines = [history.consume({'sequence': sequence, 'type': kind, 'activityId': step, 'time': 't', 'data': data}, record)
+                 for sequence, (kind, step, data) in enumerate(events, 1)]
+        self.assertEqual([line.split()[1] for line in lines], ['STARTED', 'FINISHED', 'WAITING', 'FAILED'])
+        self.assertIn('waiting for timer until noon', lines[2])
+        self.assertIn('review.yaml:check — boom; continuing at report', lines[3])
+
+
 if __name__ == '__main__':
     unittest.main()

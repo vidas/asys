@@ -97,13 +97,13 @@ class Launcher(EnvironmentHost):
         if not workflow.is_file() or not environment.is_dir():
             raise LaunchError("Expected a workflow file and an environment directory")
         if workflow.suffix.lower() == '.bpmn':
-            self.xml, self.document = workflow.read_text(), None
+            self.xml, self.workflow_document = workflow.read_text(), None
             display_name = workflow_name(self.xml, workflow, args.name)
         else:
-            self.xml, self.document = None, load_workflow(workflow, environment)
+            self.xml, self.workflow_document = None, load_workflow(workflow, environment)
             if args.process:
                 raise LaunchError('--process selects a BPMN process; a workflow file has one')
-            root = self.document['files'][self.document['root']]['data']
+            root = self.workflow_document['files'][self.workflow_document['root']]['data']
             display_name = args.name or root.get('name') or workflow.stem
         if args.input == "-":
             if args.human:
@@ -121,7 +121,7 @@ class Launcher(EnvironmentHost):
         if self.xml is not None:
             (self.directory / 'workflow/workflow.bpmn').write_text(self.xml)
         else:
-            write_json(self.directory / 'workflow/workflow.json', self.document)
+            write_json(self.directory / 'workflow/workflow.json', self.workflow_document)
         self.names = component_names(display_name, self.id)
         # The host and the workflow component talk over a runtime channel in
         # the shared runtime root: no published port, no token.
@@ -132,6 +132,8 @@ class Launcher(EnvironmentHost):
         self.record = {"id": self.id, "manager": "run", "kind": "workflow", "name": display_name, "created_at": timestamp(), "workflow": str(workflow), "environment_directory": str(environment),
                        "workspace": str(workspace), "system": args.system, "components": self.names,
                        "dcomp": self.dcomp, "status": "starting", "channel": str(self.channel)}
+        if self.workflow_document is not None:
+            self.record["workflow_root"] = self.workflow_document["root"]
         self.snapshot()
         self.say(f"Run {self.id}\nState: {self.directory}")
         self.prepare_environment(environment, args.link, human_target=self.human_target())
@@ -376,7 +378,7 @@ class Launcher(EnvironmentHost):
             self.request = inbound.send("resume", {"id": self.id})
             self.record["resumed_at"] = timestamp()
         else:
-            source = {"bpmnXml": self.xml, "processId": self.args.process} if self.xml is not None else {"workflow": self.document}
+            source = {"bpmnXml": self.xml, "processId": self.args.process} if self.xml is not None else {"workflow": self.workflow_document}
             self.request = inbound.send("start", {"id": self.id, **source,
                                                   "environment": self.record["environment"], "variables": self.variables,
                                                   "environmentDefinition": self.definition})
