@@ -8,6 +8,11 @@
         "./programs/agent"
       ]
     },
+    "greet": {
+      "command": [
+        "./programs/greet"
+      ]
+    },
     "program": {
       "command": [
         "/opt/asys/asys-workers/tools/asys-program"

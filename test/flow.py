@@ -147,6 +147,12 @@ class FlowTests(Fixture):
         self.assertIn("unknown name reviw in 'reviw.final'", found)
         self.assertEqual(flow.expression_names('question.comments or "none" and count(items) > limit'),
                          {'question', 'items', 'limit'})
+        # Context keys, filter fields, bound names and multi-word functions are not inputs.
+        self.assertEqual(flow.expression_names('{goal: brief.final, n: count(review[approved = false])}'), {'brief', 'review'})
+        self.assertEqual(flow.expression_names('for part in parts return string length(part.name) + [a, b][1]'),
+                         {'parts', 'a', 'b'})
+        self.assertEqual(flow.expression_names('get or else(x, "none")'), {'x'})
+        self.assertEqual(flow.rename_name('{evidence: evidence.final}', 'evidence', 'measure'), '{evidence: measure.final}')
 
     def test_a_switch_on_a_human_answer_must_use_a_value_its_form_allows(self):
         found = self.problems(WORKFLOW.replace('question.action = "revise"', 'question.action = "revize"'))
@@ -167,6 +173,31 @@ class FlowTests(Fixture):
         self.assertIn('a top-level step needs next, or must be an end', found)
         self.assertIn('a step has exactly one of: ' + ', '.join(flow.KINDS),
                       self.problems(WORKFLOW.replace('  accepted: {end: Accepted}', '  accepted: {end: A, run: single}')))
+
+    def test_a_run_gets_every_file_with_calls_as_file_keys(self):
+        document = flow.resolved(flow.load_all(self.write(WORKFLOW)))
+        self.assertEqual(document['root'], 'workflow.yaml')
+        self.assertEqual(document['files']['workflow.yaml']['calls'], {'review-loop.yaml': 'review-loop.yaml'})
+        self.assertEqual(document['files']['review-loop.yaml']['data']['output'], '${review}')
+        json.dumps(document)  # plain JSON, without YAML node types
+
+    def test_choose_actions_read_message_and_expressions_may_hold_braces(self):
+        chooser = WORKFLOW.replace('''  implement:
+    run: goal
+    input: {request: Implement route.py.}''', '''  implement:
+    choose:
+      coordinator: single
+      actions: [build_module]
+      input: {request: "Plan ${{goal: brief.final}}."}
+      until: ${count(build_module) >= 2}
+  build_module:
+    run: goal
+    input: {request: "Build ${message.name}."}''')
+        self.assertEqual(self.problems(chooser), [])
+        self.assertIn('not a key of choose', self.problems(chooser.replace('until: ${count', 'unti: ${count')))
+        self.assertIn("unknown name message in 'message.name'",
+                      self.problems(chooser.replace('actions: [build_module]', 'actions: [brief]')))
+        self.assertEqual(flow.spans('a ${{x: "}"}} b ${y} ${open'), [(2, 13, '{x: "}"}'), (16, 20, 'y')])
 
     def test_calls_are_followed_once_and_cycles_stop(self):
         self.write(REVIEW_LOOP.replace('run: single\n    input: {request: "${request}"}',

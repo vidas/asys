@@ -31,7 +31,7 @@ files, preserving existing assets. `KIND` is `agent`, `goal`, `senate` or `swarm
 Configure the generated files before declaring the worker ready.
 
 Launch with `asys-run ENVIRONMENT WORKER REQUEST` or
-`asys-run ENVIRONMENT WORKFLOW.bpmn --input FILE`. A workflow is a run definition,
+`asys-run ENVIRONMENT WORKFLOW.yaml --input FILE` (BPMN files still run). A workflow is a run definition,
 not another named worker kind. Programs and Human handlers are ordinary command
 bindings in `workers.json`.
 

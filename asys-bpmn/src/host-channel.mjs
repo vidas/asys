@@ -86,7 +86,7 @@ export async function serveHostChannel(runtime, { root, name = 'workflow', signa
             throw new ConnectError("The running environment's workers.json differs from the selected directory", Code.FailedPrecondition);
           }
         }
-        const { workflowId } = await runtime.loadWorkflow({ bpmnXml: data.bpmnXml });
+        const { workflowId } = await runtime.loadWorkflow({ bpmnXml: data.bpmnXml, workflow: data.workflow });
         const { run } = await runtime.startRun({ id: data.id, workflowId, processId: data.processId ?? '',
           variablesJson: JSON.stringify(data.variables ?? {}), environment: data.environment });
         return { runId: run.id, workflowId, status: run.status };

@@ -1,4 +1,4 @@
-"""BPMN execution behind the shared asys-run command."""
+"""Workflow execution (workflow/1 YAML or BPMN) behind the shared asys-run command."""
 import fcntl
 import json
 import os
@@ -16,6 +16,7 @@ from asys_runtime.files import read_json, timestamp, write_json
 from .state import state_root
 from .lifecycle import LaunchError, Interrupted, RecoveryRequired
 from .execution import EnvironmentHost, execution_options, prepare_run
+from . import flow
 from .human import HumanHandler
 from .workflow_runs import Runs, component_names, workflow_name
 from .workflow_journal import WorkflowHistory, agent_notices
@@ -24,6 +25,19 @@ from .upgrade import UpgradeHandover, finish_upgrade, handover_if_requested, pen
 SERVICE = "asys.workflow.v1.Workflow"
 CHANNEL = "workflow"
 TERMINAL = {"completed", "failed", "cancelled", "recovery-required"}
+
+
+def load_workflow(path, environment):
+    """The resolved workflow/1 document, or a LaunchError listing every problem."""
+    problems = []
+    try:
+        document = flow.load_all(path, problems)
+    except ValueError as error:
+        raise LaunchError(str(error)) from error
+    problems += flow.check(document, environment)
+    if problems:
+        raise LaunchError(f'{path} cannot run in {environment}:\n' + '\n'.join(f'  {problem}' for problem in problems))
+    return flow.resolved(document)
 
 
 def read_object(path):
@@ -81,9 +95,16 @@ class Launcher(EnvironmentHost):
         workflow = args.workflow.expanduser().resolve(strict=True)
         environment = args.environment.expanduser().resolve(strict=True)
         if not workflow.is_file() or not environment.is_dir():
-            raise LaunchError("Expected a BPMN file and an environment directory")
-        self.xml = workflow.read_text()
-        display_name = workflow_name(self.xml, workflow, args.name)
+            raise LaunchError("Expected a workflow file and an environment directory")
+        if workflow.suffix.lower() == '.bpmn':
+            self.xml, self.document = workflow.read_text(), None
+            display_name = workflow_name(self.xml, workflow, args.name)
+        else:
+            self.xml, self.document = None, load_workflow(workflow, environment)
+            if args.process:
+                raise LaunchError('--process selects a BPMN process; a workflow file has one')
+            root = self.document['files'][self.document['root']]['data']
+            display_name = args.name or root.get('name') or workflow.stem
         if args.input == "-":
             if args.human:
                 raise LaunchError('Use --input FILE with --human; the terminal is needed for human answers')
@@ -97,7 +118,10 @@ class Launcher(EnvironmentHost):
         fcntl.flock(self.lease, fcntl.LOCK_EX)
         for child in ("workflow", "engine"):
             mkdir(self.directory / child)
-        (self.directory / 'workflow/workflow.bpmn').write_text(self.xml)
+        if self.xml is not None:
+            (self.directory / 'workflow/workflow.bpmn').write_text(self.xml)
+        else:
+            write_json(self.directory / 'workflow/workflow.json', self.document)
         self.names = component_names(display_name, self.id)
         # The host and the workflow component talk over a runtime channel in
         # the shared runtime root: no published port, no token.
@@ -352,7 +376,8 @@ class Launcher(EnvironmentHost):
             self.request = inbound.send("resume", {"id": self.id})
             self.record["resumed_at"] = timestamp()
         else:
-            self.request = inbound.send("start", {"id": self.id, "bpmnXml": self.xml, "processId": self.args.process,
+            source = {"bpmnXml": self.xml, "processId": self.args.process} if self.xml is not None else {"workflow": self.document}
+            self.request = inbound.send("start", {"id": self.id, **source,
                                                   "environment": self.record["environment"], "variables": self.variables,
                                                   "environmentDefinition": self.definition})
         self.active = True  # The request is durable even if this process stops.

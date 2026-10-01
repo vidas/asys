@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+"""A program the environment declares: workflows name it, they do not supply it."""
+import json
+import os
+
+with open(os.environ["ASYS_RESULT"], "w") as result:
+    json.dump({"message": "Hello from asys."}, result)

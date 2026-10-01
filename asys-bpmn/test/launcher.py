@@ -45,6 +45,13 @@ def check_launcher(root, dcomp, system, temp, run, until, log, agent_environment
         assert (hello_run.parent / 'run.log').is_file()
         assert 'RUN COMPLETED' in workflow_log and '[stdout]' not in workflow_log, workflow_log
         print('PASS: hello/workflow.bpmn with its own hello/env/dummy -> Hello from asys.', flush=True)
+        example = json.loads(run(launcher, 'env/dummy', 'workflow.yaml', *common, cwd=root / 'examples/hello'))
+        assert example == {'message': 'Hello from asys.'}, example
+        yaml_run = max(cli_root.glob('runs/*/run.json'), key=lambda path: path.stat().st_mtime)
+        saved = json.loads((yaml_run.parent / 'workflow/workflow.json').read_text())
+        assert saved['root'] == 'workflow.yaml' and saved['files']['workflow.yaml']['data']['steps']['greet']['run'] == 'greet', saved
+        assert 'greet' in run(observer, 'logs', str(yaml_run.parent))
+        print('PASS: hello/workflow.yaml runs on the workflow/1 engine with the saved resolved document', flush=True)
         output = json.loads(run(launcher, 'env/dummy', 'workflow.bpmn', '--input', 'request.md', *common,
                                    cwd=root / 'examples/shared-workspace'))
         assert output['assemble'] == {'report': 'First section\nSecond section\n', 'sections': 2}, output

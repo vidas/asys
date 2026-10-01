@@ -229,7 +229,7 @@ copies installed under other prefixes are not changed. All new execution uses:
 
 ```text
 asys-run ENVIRONMENT WORKER REQUEST
-asys-run ENVIRONMENT WORKFLOW.bpmn --input FILE
+asys-run ENVIRONMENT WORKFLOW.yaml --input FILE   (or WORKFLOW.bpmn)
 asys-run --resume RUN
 asys-run --upgrade RUN
 asys-workers COMMAND ENVIRONMENT ...

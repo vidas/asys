@@ -1,0 +1,9 @@
+asys: workflow/1
+name: Hello from a worker environment
+start: greet
+steps:
+  greet:
+    run: greet            # a program declared in env/dummy/workers.json
+    description: Write a greeting
+    next: done
+  done: {end: Greeted}

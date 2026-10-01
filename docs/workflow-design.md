@@ -162,7 +162,9 @@ review:
 `input` is the job's JSON. Plain values are literal. `${expression}` inside a
 string inserts a value; a string that is exactly `${expression}` keeps the
 value's type. The result is stored under the step ID; with `for_each` it is a
-list in item order.
+list of the finished items' results in item order. `index` counts from 1, as
+FEEL lists do. `until` sees the step's own ID bound to that list; once it
+holds, unfinished items are cancelled.
 
 ### `parallel` and `join`
 
@@ -225,10 +227,17 @@ required.
 ```yaml
 polish:
   repeat:
-    step: edit                     # a run, group or call step defined inline
-    until: ${edit.approved = true}
+    step:                          # a run, group or call step, defined inline
+      run: editor
+      input: {request: "Improve ${if polish = null then brief.final else polish.final}."}
+    until: ${step.approved = true}
     max: 5
 ```
+
+Each iteration runs the inline step as new work. Inside `until` its latest
+result is `step`; the repeat's own ID holds that result as well, so the next
+iteration can read it. The loop ends when `until` holds or after `max`
+iterations, with the latest result as the step's result.
 
 ### `choose`: work selected by a coordinator
 
@@ -236,15 +245,23 @@ polish:
 build:
   choose:
     coordinator: planner           # a worker type with the action tools
+    input: {request: Build the modules in plan.md.}
     actions: [design_module, test_module, document]
     sequential: false
     until: ${count(test_module) >= 3}
 ```
 
-The coordinator receives `list_actions`, `start_action` and `wait_action`, as
-with an ad-hoc subprocess today. Actions are steps of this workflow; a step can
-be selected once at a time. The result holds each action's results and the
-coordinator's report.
+The coordinator is a job of that type, given `input`. It receives
+`list_actions`, `start_action` and `wait_action`, as with an ad-hoc subprocess
+today. Actions are steps of this scope; each runs at most once at a time, and
+reads the coordinator's request as `message`. A request whose input the action
+cannot use is returned to the coordinator as failed, without starting work.
+
+Inside `until`, each action's ID is the list of its completed results. Without
+`until`, the step finishes when the coordinator does; with it, it finishes once
+`until` holds, cancelling the coordinator and, unless `sequential`, any running
+actions. The result maps each action to its list of results, plus `report`, the
+coordinator's own result. A failing action fails the step.
 
 ### `wait`: a message
 
@@ -288,7 +305,13 @@ appear in `${...}` inside strings, and in `when`, `until` and `output`. Visible
 names are `request` and the other inputs, every finished step's result under
 its ID, the current `item` (or its `as` name) and `index` inside `for_each`, and
 `message` inside a `choose` action. A step that runs again replaces its result,
-so a revision loop always sees the latest one.
+so a revision loop always sees the latest one. A called file sees only its
+inputs and its own steps.
+
+A string that is exactly one `${...}` keeps the value's type, so
+`${{topic: brief.topic}}` is a context. Names inside a filter, such as
+`approved` in `review[approved = false]`, belong to each item, and keys of a
+context literal are not names.
 
 ## Validation
 
@@ -301,28 +324,41 @@ Before a run starts, the loaded workflow and every called file are checked:
   its group or parallel branch;
 - each `call` resolves, its `input` satisfies the callee's `inputs`, and calls
   do not exceed the depth limit;
-- every expression parses, and refers only to names that exist at that point;
+- every expression refers only to names that exist at that point, and parses
+  (checked by the engine's FEEL parser when the run's workflow is loaded);
 - every form file is valid JSON Schema, and a `switch` that compares a human
   answer with a literal uses a value the form allows;
 - durations are valid ISO 8601.
 
 ## Engine
 
-A new component, `asys-flow`, runs beside `asys-bpmn`. Both implement the same
-host-channel requests (`start`, `status`, `recover`, `resume`, `cancel`,
-`message`) and the `asys.workflow.v1.Workflow` service, so the launcher chooses
-the engine by file type and nothing above it changes.
+The interpreter (`asys-bpmn/src/flow.mjs`) runs inside the existing workflow
+component, beside the BPMN engine. Everything around an execution is shared
+and engine-neutral: the host-channel requests (`start`, `status`, `recover`,
+`resume`, `cancel`, `message`), the `asys.workflow.v1.Workflow` service, the
+SQLite run store, job dispatch to the filesystem queue, failure checkpoints for
+`asys-run --resume`, and the upgrade handover. Only the execution differs. A
+second component would have duplicated all of that, and two images to keep in
+step for every update. Each run records its engine (`asys-flow/1` or the BPMN
+engine's version), and recovery, resume and upgrade refuse a run whose engine
+does not match. Retiring BPMN later removes one execution class and its
+libraries.
 
-The engine's state is the set of active step instances (with their scope, item
-and attempt), waiting joins, timers and message waits. Each transition is
-committed to SQLite before its effects: a job is recorded before it is
-submitted to the queue, and a result is recorded before the next step starts.
-Recovery reloads that state and reconciles it with the queue, as today. A step
-that runs again gets a new job; finished jobs are never re-run by recovery.
+`asys-run` chooses by file type. For `.yaml` and `.yml` it loads the file and
+every file it calls, validates them against the selected environment, refuses
+to start on any problem, and sends the resolved document (the files keyed by
+path relative to the root file, each call resolved to a key). The run keeps
+that document in `workflow/workflow.json`, so resume and upgrade never read a
+file that changed since.
 
-The run keeps the resolved workflow (all called files) and its digest. Resume
-and upgrade use the saved copy and check that the replacement engine accepts
-its format version.
+A run is a tree of frames: the workflow, a group, a called file, a parallel
+branch, a `for_each` item, a `repeat` iteration or a `choose` action. A frame
+has a cursor at its current step and records which children that step
+started. Each change is saved before its effects: a job is recorded before it
+is submitted, and a result before the next step starts. A job is keyed by
+frame, step and visit, so recovery waits for a recorded job instead of
+submitting it again, and a step that runs again gets a new job. Stopping the
+component never cancels work; it only stops waiting for it.
 
 ## Viewer and editor
 

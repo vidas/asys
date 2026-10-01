@@ -6,6 +6,7 @@ comments or order. Validation collects every problem with its location instead
 of stopping at the first; see docs/workflow-design.md for the format.
 """
 import json
+import os
 from pathlib import Path
 import re
 
@@ -28,6 +29,7 @@ FIELDS = {
     'compensate': set(),
     'end': set(),
 }
+CHOOSE = {'coordinator', 'actions', 'input', 'sequential', 'until'}
 # Kinds that never continue with `next`: they route by their own keys.
 NO_NEXT = {'parallel', 'switch', 'end'}
 STEP_ID = re.compile(r'^[a-z][a-z0-9_]*$')
@@ -35,7 +37,13 @@ DURATION = re.compile(r'^P(?!$)(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)
 MAX_CALL_DEPTH = 16
 FEEL_WORDS = {'and', 'or', 'not', 'if', 'then', 'else', 'for', 'in', 'return', 'some', 'every', 'satisfies',
               'true', 'false', 'null', 'between', 'instance', 'of', 'function', 'date', 'time', 'duration'}
-INTERPOLATION = re.compile(r'\$\{((?:[^{}"\']|"[^"]*"|\'[^\']*\')*)\}')
+# FEEL built-ins whose names contain spaces.
+FEEL_FUNCTIONS = {'string length', 'upper case', 'lower case', 'substring before', 'substring after', 'starts with',
+                  'ends with', 'list contains', 'insert before', 'index of', 'distinct values', 'get value',
+                  'get entries', 'context put', 'context merge', 'date and time', 'years and months duration',
+                  'day of year', 'day of week', 'month of year', 'week of year', 'is defined', 'get or else',
+                  'string join', 'round up', 'round down', 'round half up', 'round half down', 'last day of month'}
+NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
 
 
 class Problem(dict):
@@ -49,7 +57,7 @@ class Workflow:
         self.path = Path(path)
         self.data = data
         self.text = text
-        self.calls = {}           # resolved path -> Workflow
+        self.calls = {}           # call target as written -> Workflow
 
     @property
     def steps(self):
@@ -103,6 +111,27 @@ def load_all(path, problems=None):
     return root
 
 
+def resolved(workflow):
+    """The document a run executes: every file, with its calls as file keys.
+
+    Keys are paths relative to the root file's directory. The run keeps this
+    copy, so resume and upgrade never read a file that changed since.
+    """
+    base = workflow.path.parent
+
+    def key(each):
+        return Path(os.path.relpath(each.path, base)).as_posix()
+    files, pending = {}, [workflow]
+    while pending:
+        current = pending.pop()
+        if key(current) in files:
+            continue
+        files[key(current)] = {'data': json.loads(json.dumps(current.data, default=str)),
+                               'calls': {ref: key(called) for ref, called in current.calls.items()}}
+        pending.extend(current.calls.values())
+    return {'root': key(workflow), 'files': files}
+
+
 def check(workflow, environment=None):
     """Return every problem in WORKFLOW and the files it calls."""
     kinds = worker_kinds(environment) if environment is not None else None
@@ -138,29 +167,105 @@ def worker_kinds(environment):
     return kinds
 
 
+def references(expression):
+    """(start, end, name) for each root name EXPRESSION reads from its context.
+
+    `review.final` reads `review`. Not references: strings, `.field` paths,
+    function names (including FEEL's multi-word ones), context keys
+    (`{key: ...}`), names bound by for, some and every, and names inside a
+    filter (`list[approved = false]`), which FEEL resolves against each item.
+    """
+    tokens = [(match.start(), match.end(), match.group())
+              for match in re.finditer(r'"(?:[^"\\]|\\.)*"|[A-Za-z_][A-Za-z0-9_]*|\.\.|\S', expression)]
+    found, bound, brackets = [], set(), []
+    index = 0
+    while index < len(tokens):
+        start, end, token = tokens[index]
+        before = tokens[index - 1][2] if index else ''
+        if token == '[':
+            # A filter follows a value; a list literal follows an operator.
+            brackets.append(before in (')', ']', '}') or (NAME.fullmatch(before) and before not in FEEL_WORDS))
+        elif token == ']' and brackets:
+            brackets.pop()
+        elif NAME.fullmatch(token):
+            words = _function_words(tokens, index)
+            if words:
+                index += words
+                continue
+            after = tokens[index + 1][2] if index + 1 < len(tokens) else ''
+            if before in ('for', 'some', 'every'):
+                bound.add(token)
+            elif not (before == '.' or after in ('(', ':') or any(brackets) or token in bound or token in FEEL_WORDS):
+                found.append((start, end, token))
+        index += 1
+    return found
+
+
+def _function_words(tokens, index):
+    """How many name tokens from INDEX form a function name before `(`, or 0."""
+    for size in range(4, 0, -1):
+        words = tokens[index:index + size]
+        if len(words) == size and index + size < len(tokens) and tokens[index + size][2] == '(' \
+                and all(NAME.fullmatch(word[2]) for word in words) \
+                and (size == 1 or ' '.join(word[2] for word in words) in FEEL_FUNCTIONS):
+            return size
+    return 0
+
+
 def expression_names(expression):
     """Root names an expression reads: `review.final` reads `review`."""
-    text = re.sub(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'', ' ', expression)
-    names = set()
-    for match in re.finditer(r'(?<![\w.])([A-Za-z_][A-Za-z0-9_]*)\b(?!\s*\()', text):
-        if match.group(1) not in FEEL_WORDS:
-            names.add(match.group(1))
-    return names
+    return {name for _, _, name in references(expression)}
 
 
 def rename_name(expression, old, new):
     """EXPRESSION reading NEW wherever it read the root name OLD."""
-    pieces = re.split(r'("(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\')', expression)
-    pattern = re.compile(rf'(?<![\w.]){re.escape(old)}\b(?!\s*\()')
-    return ''.join(piece if index % 2 else pattern.sub(new, piece) for index, piece in enumerate(pieces))
+    for start, end, name in reversed(references(expression)):
+        if name == old:
+            expression = expression[:start] + new + expression[end:]
+    return expression
+
+
+def spans(text):
+    """(start, end, expression) for each `${...}` in TEXT.
+
+    Braces nest, so `${{a: 1}}` holds a FEEL context, and quoted strings may
+    contain any character. An unclosed `${` is plain text.
+    """
+    found, position = [], 0
+    while (start := text.find('${', position)) >= 0:
+        depth, index, quoted = 1, start + 2, False
+        while index < len(text) and depth:
+            char = text[index]
+            if quoted:
+                if char == '\\':
+                    index += 1
+                elif char == '"':
+                    quoted = False
+            elif char == '"':
+                quoted = True
+            elif char == '{':
+                depth += 1
+            elif char == '}':
+                depth -= 1
+            index += 1
+        if depth:
+            break
+        found.append((start, index, text[start + 2:index - 1]))
+        position = index
+    return found
 
 
 def rename_in_value(value, old, new, *, bare=False):
     """Rename a step's references in a field: `${...}` in text, or a bare expression."""
     if isinstance(value, str):
-        if bare and not INTERPOLATION.search(value):
+        found = spans(value)
+        if bare and not found:
             return rename_name(value, old, new)
-        return INTERPOLATION.sub(lambda match: '${' + rename_name(match.group(1), old, new) + '}', value)
+        text, last = [], 0
+        for start, end, expression in found:
+            text += [value[last:start], '${', rename_name(expression, old, new), '}']
+            last = end
+        return ''.join(text) + value[last:]
     if isinstance(value, dict):
         for key in value:
             value[key] = rename_in_value(value[key], old, new)
@@ -173,7 +278,7 @@ def rename_in_value(value, old, new, *, bare=False):
 def interpolations(value):
     """Every `${...}` expression inside a string, or nested in lists and maps."""
     if isinstance(value, str):
-        return [match.group(1) for match in INTERPOLATION.finditer(value)]
+        return [expression for _, _, expression in spans(value)]
     if isinstance(value, dict):
         return [found for item in value.values() for found in interpolations(item)]
     if isinstance(value, list):
@@ -235,6 +340,9 @@ def _check_scope(document, at, steps, start, start_at, outer, kinds, report, *, 
         report(start_at, f'start must name a step of this scope (found {start!r})')
     visible = outer | set(steps)
     referenced = {'branch': set(), 'action': set(), 'undo': set()}
+    # Actions run at a coordinator's request and read its input as `message`.
+    actions = {action for step in steps.values() if isinstance(step, dict) and isinstance(step.get('choose'), dict)
+               for action in step['choose'].get('actions') or [] if isinstance(action, str)}
 
     def target(where, name):
         if name not in steps:
@@ -265,15 +373,16 @@ def _check_scope(document, at, steps, start, start_at, outer, kinds, report, *, 
             report(f'{where}.timeout', 'an ISO 8601 duration such as PT30M or P2D')
         if 'on_timeout' in step and 'timeout' not in step:
             report(f'{where}.on_timeout', 'on_timeout needs timeout')
-        local = set(visible)
+        local = set(visible) | ({'message'} if name in actions else set())
         if 'for_each' in step:
             local |= {step.get('as', 'item'), 'index'}
             for expression in _expressions(step['for_each']):
                 _check_expression(expression, visible, f'{where}.for_each', report)
         if 'until' in step:
             _check_expression(_bare(step['until']), local | {name}, f'{where}.until', report)
-        for expression in interpolations(step.get('input', {})):
-            _check_expression(expression, local, f'{where}.input', report)
+        for key in ('input', 'args'):
+            for expression in interpolations(step.get(key, {})):
+                _check_expression(expression, local, f'{where}.{key}', report)
         _check_kind(document, kind, step, where, steps, local, kinds, referenced, report, target)
     if top:
         # Branches, actions and undo steps finish where they are used; every
@@ -354,9 +463,16 @@ def _check_kind(document, kind, step, where, steps, visible, kinds, referenced, 
         if 'max' in value and (not isinstance(value['max'], int) or value['max'] < 1):
             report(f'{where}.repeat.max', 'max is a positive integer')
     elif kind == 'choose':
-        if not isinstance(value, dict) or 'coordinator' not in value or not value.get('actions'):
+        if not isinstance(value, dict) or 'coordinator' not in value or not isinstance(value.get('actions'), list) \
+                or not value['actions']:
             report(f'{where}.choose', 'choose has coordinator and actions')
             return
+        for key in set(value) - CHOOSE:
+            report(f'{where}.choose.{key}', 'not a key of choose')
+        for expression in interpolations(value.get('input', {})):
+            _check_expression(expression, visible, f'{where}.choose.input', report)
+        if 'until' in value:
+            _check_expression(_bare(value['until']), visible, f'{where}.choose.until', report)
         if kinds is not None and value['coordinator'] not in kinds:
             report(f'{where}.choose.coordinator', f'the environment has no worker type {value["coordinator"]!r}')
         for action in value['actions']:
@@ -509,8 +625,8 @@ def _expressions(value):
 def _bare(value):
     """`${expr}` or plain `expr` as a FEEL expression."""
     text = str(value).strip()
-    match = INTERPOLATION.fullmatch(text)
-    return match.group(1) if match else text
+    found = spans(text)
+    return found[0][2] if len(found) == 1 and found[0][:2] == (0, len(text)) else text
 
 
 def _duration(value):

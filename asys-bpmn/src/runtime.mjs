@@ -11,6 +11,7 @@ import { expressions, scripts, feel, contextOf } from './expressions.mjs';
 import { clone, digest, errorRecord, object, parseJSON, requiredString, variables, publicVariables } from './values.mjs';
 import { AdHoc, actionEvent } from './ad-hoc.mjs';
 import { applyOutput, dataValue, inputValues } from './data.mjs';
+import { FORMAT as FLOW_FORMAT, FLOW_ENGINE, FlowExecution, flowArtifact, flowJobTypes } from './flow.mjs';
 
 const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
 const now = () => new Date().toISOString();
@@ -29,7 +30,10 @@ export class WorkflowRuntime {
     this.closing = false;
   }
   async prepare(artifact) {
-    if (!this.definitions.has(artifact.id)) this.definitions.set(artifact.id, await prepareEngine(artifact));
+    // workflow/1 documents are interpreted directly; BPMN needs an engine definition.
+    if (artifact.format !== FLOW_FORMAT && !this.definitions.has(artifact.id)) {
+      this.definitions.set(artifact.id, await prepareEngine(artifact));
+    }
     return artifact;
   }
   async recover() {
@@ -47,7 +51,7 @@ export class WorkflowRuntime {
     });
   }
   async continueRun(record) {
-    if (record.engine !== ENGINE) throw new Error(`Run ${record.id} requires workflow engine ${record.engine}`);
+    if (record.engine !== engineOf(this.store.workflow(record.workflowId))) throw new Error(`Run ${record.id} requires workflow engine ${record.engine}`);
     await this.prepare(this.store.workflow(record.workflowId));
     record.status = 'running';
     await this.store.save(record);
@@ -68,7 +72,7 @@ export class WorkflowRuntime {
   }
   async resumeFailedRun(id) {
     const record = this.record(id);
-    if (record.engine !== ENGINE) fail(`Run ${id} requires workflow engine ${record.engine}`, Code.FailedPrecondition);
+    if (record.engine !== engineOf(this.store.workflow(record.workflowId))) fail(`Run ${id} requires workflow engine ${record.engine}`, Code.FailedPrecondition);
     if (record.status === 'resuming') {
       await this.continueRun(record);
       return this.getRun({ id });
@@ -130,10 +134,10 @@ export class WorkflowRuntime {
     pending.then(cleanup, cleanup);
     return pending;
   }
-  async loadWorkflow({ bpmnXml }) {
+  async loadWorkflow({ bpmnXml, workflow }) {
     this.ready();
     let artifact;
-    try { artifact = await this.prepare(await parseWorkflow(bpmnXml)); }
+    try { artifact = await this.prepare(workflow !== undefined ? flowArtifact(workflow) : await parseWorkflow(bpmnXml)); }
     catch (error) { fail(error.message); }
     return { workflowId: await this.store.loadWorkflow(artifact) };
   }
@@ -151,7 +155,7 @@ export class WorkflowRuntime {
     let descriptor;
     try { descriptor = await this.environments.get(environment); }
     catch (error) { fail(error.message, Code.FailedPrecondition); }
-    const requiredTypes = requiredJobTypes(artifact, processId);
+    const requiredTypes = artifact.format === FLOW_FORMAT ? flowJobTypes(artifact) : requiredJobTypes(artifact, processId);
     const missingTypes = requiredTypes.filter(type => !descriptor.types.includes(type));
     return { compatible: !missingTypes.length, requiredTypes, missingTypes };
   }
@@ -181,7 +185,7 @@ export class WorkflowRuntime {
       if (raced.inputHash !== inputHash) fail('Run ID was already used with different input', Code.AlreadyExists);
       return this.getRun({ id });
     }
-    const record = { id, workflowId, processId, environment, workspace: this.workspace, inputHash, variables: input, engine: ENGINE, status: 'running',
+    const record = { id, workflowId, processId, environment, workspace: this.workspace, inputHash, variables: input, engine: engineOf(artifact), status: 'running',
       createdAt: now(), updatedAt: now(), jobs: {}, messages: {}, output: {}, definition: null };
     await this.store.save(record, [{ type: 'run.created' }]);
     const run = this.attach(record);
@@ -190,7 +194,8 @@ export class WorkflowRuntime {
     return this.getRun({ id });
   }
   attach(record) {
-    const run = new Execution(this, record, this.store.workflow(record.workflowId));
+    const artifact = this.store.workflow(record.workflowId);
+    const run = new (artifact.format === FLOW_FORMAT ? FlowExecution : Execution)(this, record, artifact);
     this.active.set(record.id, run);
     return run;
   }
@@ -245,9 +250,13 @@ export class WorkflowRuntime {
     }
     if (TERMINAL.has(record.status)) fail('Run has finished', Code.FailedPrecondition);
     const run = this.active.get(runId);
-    const waiting = run.waiters.get(target);
-    const known = ['bpmn:Message', 'bpmn:Signal'].includes(run.index.get(target)?.$type);
-    if (waiting?.activity.type !== 'bpmn:ReceiveTask' && !known) fail('Message target must be a BPMN message, signal, or waiting receive execution');
+    if (run instanceof FlowExecution) {
+      if (!run.index.has(target)) fail('Message target must be a message a wait step of this workflow names');
+    } else {
+      const waiting = run.waiters.get(target);
+      const known = ['bpmn:Message', 'bpmn:Signal'].includes(run.index.get(target)?.$type);
+      if (waiting?.activity.type !== 'bpmn:ReceiveTask' && !known) fail('Message target must be a BPMN message, signal, or waiting receive execution');
+    }
     record.messages = { ...record.messages, [id]: { hash, target, payload, applied: false } };
     run.event('message.received', '', { id, target });
     await run.checkpoint();
@@ -527,6 +536,9 @@ class Execution {
   }
 }
 
+function engineOf(artifact) {
+  return artifact?.format === FLOW_FORMAT ? FLOW_ENGINE : ENGINE;
+}
 function identifier(value, label) {
   if (typeof value !== 'string' || !value.trim() || value.length > 256 || /[\u0000-\u001f]/u.test(value)) fail(`${label} must contain 1–256 printable characters`);
 }

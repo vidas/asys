@@ -4,7 +4,8 @@
 
 ```text
 asys-run ENVIRONMENT WORKER [REQUEST] [OPTIONS]
-asys-run ENVIRONMENT WORKFLOW.bpmn [REQUEST] [OPTIONS]
+asys-run ENVIRONMENT WORKFLOW.yaml|WORKFLOW.bpmn [REQUEST] [OPTIONS]
+asys workflow check WORKFLOW.yaml [--environment DIRECTORY] [--json]
 asys-run --resume RUN [--root DIRECTORY] [--human]
 asys-run --upgrade RUN [--root DIRECTORY] [--human]
 asys-workers list ENVIRONMENT [--json]

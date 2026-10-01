@@ -83,7 +83,7 @@ test('worker and environment authoring install with the shared runner and world 
   await invoke('asys-environment', 'add-skill', environment, skill);
   assert.equal(await readFile(join(environment, 'skills/checking/reference.txt'), 'utf8'), 'Complete imported asset.\n');
   const { stdout: help } = await invoke('asys-run', '--help');
-  assert.match(help, /ENVIRONMENT WORKER\|WORKFLOW\.bpmn \[REQUEST\]/);
+  assert.match(help, /ENVIRONMENT WORKER\|WORKFLOW \[REQUEST\]/);
   assert.match(help, /--workspace DIRECTORY/);
   assert.match(help, /--model MODEL/);
   assert.doesNotMatch(help, /--view|--port/);
@@ -251,5 +251,5 @@ assert arguments(['env', 'simple', 'Do the work']).worker == 'simple'
 from asys_swarm.config import validate_config
 `, join(prefix, 'share/asys/python')], { cwd: root });
   const help = await exec('python3', ['-I', '-S', join(prefix, 'bin/asys-run'), '--help'], { cwd: root });
-  assert.match(help.stdout, /ENVIRONMENT WORKER\|WORKFLOW\.bpmn \[REQUEST\]/);
+  assert.match(help.stdout, /ENVIRONMENT WORKER\|WORKFLOW \[REQUEST\]/);
 });

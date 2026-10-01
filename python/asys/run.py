@@ -25,12 +25,16 @@ from .options import ROOT_HELP
 from .worker_definitions import builtin_definition, definition_command, load_definition
 
 
+# A workflow file is BPMN or workflow/1 YAML; anything else names a worker.
+WORKFLOW_SUFFIXES = {'.bpmn', '.yaml', '.yml'}
+
+
 def arguments(argv):
     parser = argparse.ArgumentParser(prog='asys-run', allow_abbrev=False,
-        description='Run a named worker or a BPMN workflow in the selected environment.',
-        usage='%(prog)s ENVIRONMENT WORKER|WORKFLOW.bpmn [REQUEST] [OPTIONS]\n       %(prog)s --resume RUN [--root DIRECTORY] [--human]\n       %(prog)s --upgrade RUN [--root DIRECTORY] [--human]')
+        description='Run a named worker or a workflow (YAML or BPMN) in the selected environment.',
+        usage='%(prog)s ENVIRONMENT WORKER|WORKFLOW [REQUEST] [OPTIONS]\n       %(prog)s --resume RUN [--root DIRECTORY] [--human]\n       %(prog)s --upgrade RUN [--root DIRECTORY] [--human]')
     parser.add_argument('environment', type=Path, nargs='?', metavar='ENVIRONMENT')
-    parser.add_argument('worker', nargs='?', metavar='WORKER|WORKFLOW.bpmn')
+    parser.add_argument('worker', nargs='?', metavar='WORKER|WORKFLOW')
     parser.add_argument('request', nargs='?', metavar='REQUEST')
     parser.add_argument('--input', metavar='FILE', help='read the Markdown request from a file; - reads stdin')
     maintenance = parser.add_mutually_exclusive_group()
@@ -59,10 +63,10 @@ def arguments(argv):
     args.system = args.system or 'asys'
     args.link = args.link or []
     if args.environment is None or args.worker is None:
-        parser.error('ENVIRONMENT and WORKER or WORKFLOW.bpmn are required')
+        parser.error('ENVIRONMENT and WORKER or WORKFLOW (.yaml or .bpmn) are required')
     if args.input is not None and args.request is not None:
         parser.error('Supply REQUEST or --input FILE, not both')
-    if Path(args.worker).suffix.lower() == '.bpmn':
+    if Path(args.worker).suffix.lower() in WORKFLOW_SUFFIXES:
         args.workflow = Path(args.worker)
         args.worker = None
         if args.model is not None or args.parameters is not None:
