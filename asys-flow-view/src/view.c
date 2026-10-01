@@ -52,7 +52,7 @@ typedef struct {
 
 static struct {
     XtAppContext app;
-    Widget top, paned, bar, split, map, side, heading, subheading, fields_view, fields, details;
+    Widget top, paned, bar, split, map, side, about, notes, heading, subheading, fields_view, fields, details;
     Widget issues_title, issues_view, issues, yaml, mini, prompt, entry, palette, matches;
     char *file, *environment, *run, *root;
     int run_mode, dirty, can_undo, can_redo, quit_armed, yaml_shown, panel_hidden;
@@ -869,12 +869,13 @@ static String fallback[] = {
     "AsysFlowView*SimpleMenu*vertSpace: 40",
     "AsysFlowView*SimpleMenu*line.foreground: #9B9384",
     "AsysFlowView*side*background: #E1D9C8",
-    "AsysFlowView*side.heading.internalWidth: 14",
-    "AsysFlowView*side.heading.internalHeight: 8",
-    "AsysFlowView*side.subheading.foreground: #6E675B",
-    "AsysFlowView*side.subheading.internalWidth: 14",
-    "AsysFlowView*side.issuesTitle.font: -adobe-helvetica-bold-r-normal--12-*-*-*-p-*-iso8859-1",
-    "AsysFlowView*side.issuesTitle.internalWidth: 14",
+    "AsysFlowView*about.heading.internalWidth: 14",
+    "AsysFlowView*about.heading.internalHeight: 8",
+    "AsysFlowView*about.subheading.foreground: #6E675B",
+    "AsysFlowView*about.subheading.internalWidth: 14",
+    "AsysFlowView*notes.issuesTitle.font: -adobe-helvetica-bold-r-normal--12-*-*-*-p-*-iso8859-1",
+    "AsysFlowView*notes.issuesTitle.internalWidth: 14",
+    "AsysFlowView*notes.issuesTitle.internalHeight: 8",
     "AsysFlowView*fields.defaultDistance: 6",
     "AsysFlowView*fields*key.foreground: #6E675B",
     "AsysFlowView*fields*value.background: #EFE7D6",
@@ -991,40 +992,47 @@ int main(int argc, char **argv) {
     if (!v.run_mode) menu(v.bar, "edit", "Edit", edit_entries);
     menu(v.bar, "view", "View", view_entries);
 
-    v.split = XtVaCreateManagedWidget("split", panedWidgetClass, v.paned, XtNorientation, XtorientHorizontal,
+    /* The map above, at the window's full width; the panel a strip beneath it,
+     * in two columns: what is selected and its fields, then its problems or
+     * the YAML. */
+    v.split = XtVaCreateManagedWidget("split", panedWidgetClass, v.paned, XtNorientation, XtorientVertical,
                                       XtNshowGrip, False, NULL);
-    v.map = XtVaCreateManagedWidget("map", mapWidgetClass, v.split, XtNwidth, 1000, XtNheight, 600, NULL);
+    v.map = XtVaCreateManagedWidget("map", mapWidgetClass, v.split, XtNwidth, 1280, XtNheight, 600, XtNmin, 160, NULL);
     XtOverrideTranslations(v.map, XtParseTranslationTable(map_keys));
     XtAddCallback(v.map, XtNselectCallback, map_selected, NULL);
     XtAddCallback(v.map, XtNactivateCallback, map_activated, NULL);
     XtAddCallback(v.map, XtNconnectCallback, map_connected, NULL);
 
-    v.side = XtVaCreateManagedWidget("side", panedWidgetClass, v.split, XtNorientation, XtorientVertical, XtNwidth, 320,
-                                     XtNmin, 240, XtNinternalBorderWidth, 0, NULL);
+    v.side = XtVaCreateManagedWidget("side", panedWidgetClass, v.split, XtNorientation, XtorientHorizontal,
+                                     XtNpreferredPaneSize, 210, XtNmin, 120, XtNskipAdjust, True, XtNinternalBorderWidth, 1, NULL);
+    v.about = XtVaCreateManagedWidget("about", panedWidgetClass, v.side, XtNorientation, XtorientVertical,
+                                      XtNwidth, 640, XtNmin, 300, XtNinternalBorderWidth, 0, NULL);
+    v.notes = XtVaCreateManagedWidget("notes", panedWidgetClass, v.side, XtNorientation, XtorientVertical,
+                                      XtNwidth, 640, XtNmin, 200, XtNinternalBorderWidth, 0, NULL);
     Display *display = XtDisplay(v.top);
     v.mono_heading = XLoadQueryFont(display, "-adobe-courier-bold-r-normal--18-*-*-*-m-*-iso8859-1");
     v.sans_heading = XLoadQueryFont(display, "-adobe-helvetica-bold-r-normal--18-*-*-*-p-*-iso8859-1");
     if (!v.mono_heading) v.mono_heading = XLoadQueryFont(display, "fixed");
     if (!v.sans_heading) v.sans_heading = XLoadQueryFont(display, "fixed");
-    v.heading = XtVaCreateManagedWidget("heading", labelWidgetClass, v.side, XtNlabel, "", XtNjustify, XtJustifyLeft,
+    v.heading = XtVaCreateManagedWidget("heading", labelWidgetClass, v.about, XtNlabel, "", XtNjustify, XtJustifyLeft,
                                         XtNfont, v.sans_heading, XtNshowGrip, False, XtNskipAdjust, True, NULL);
-    v.subheading = XtVaCreateManagedWidget("subheading", labelWidgetClass, v.side, XtNlabel, "", XtNjustify, XtJustifyLeft,
+    v.subheading = XtVaCreateManagedWidget("subheading", labelWidgetClass, v.about, XtNlabel, "", XtNjustify, XtJustifyLeft,
                                            XtNshowGrip, False, XtNskipAdjust, True, NULL);
     if (v.run_mode) {
-        v.details = XtVaCreateManagedWidget("details", asciiTextWidgetClass, v.side, XtNscrollVertical, XawtextScrollWhenNeeded,
+        v.details = XtVaCreateManagedWidget("details", asciiTextWidgetClass, v.about, XtNscrollVertical, XawtextScrollWhenNeeded,
                                             XtNwrap, XawtextWrapLine, XtNeditType, XawtextRead, XtNstring, "",
-                                            XtNdisplayCaret, False, XtNpreferredPaneSize, 600, XtNmin, 160, XtNleftMargin, 14, XtNtopMargin, 6, NULL);
+                                            XtNdisplayCaret, False, XtNpreferredPaneSize, 400, XtNmin, 60, XtNleftMargin, 14, XtNtopMargin, 6, NULL);
     } else {
-        v.fields_view = XtVaCreateManagedWidget("fieldsView", viewportWidgetClass, v.side, XtNallowVert, True, XtNheight, 300,
-                                                XtNpreferredPaneSize, 320, XtNmin, 120,
+        v.fields_view = XtVaCreateManagedWidget("fieldsView", viewportWidgetClass, v.about, XtNallowVert, True, XtNheight, 160,
+                                                XtNpreferredPaneSize, 400, XtNmin, 60,
                                                 XtNforceBars, False, XtNuseRight, True, NULL);
-        v.fields = XtVaCreateManagedWidget("fields", formWidgetClass, v.fields_view, XtNwidth, 300, XtNheight, 40, NULL);
-        v.details = XtVaCreateWidget("details", asciiTextWidgetClass, v.side, XtNeditType, XawtextRead, NULL);
+        v.fields = XtVaCreateManagedWidget("fields", formWidgetClass, v.fields_view, XtNwidth, 600, XtNheight, 40, NULL);
+        v.details = XtVaCreateWidget("details", asciiTextWidgetClass, v.about, XtNeditType, XawtextRead, NULL);
     }
-    v.issues_title = XtVaCreateManagedWidget("issuesTitle", labelWidgetClass, v.side, XtNlabel, "", XtNjustify, XtJustifyLeft,
+    v.issues_title = XtVaCreateManagedWidget("issuesTitle", labelWidgetClass, v.notes, XtNlabel, "", XtNjustify, XtJustifyLeft,
                                              XtNshowGrip, False, XtNskipAdjust, True, NULL);
-    v.issues_view = XtVaCreateManagedWidget("issuesView", viewportWidgetClass, v.side, XtNallowVert, True, XtNheight, 140,
-                                            XtNpreferredPaneSize, 140, XtNmin, 40,
+    v.issues_view = XtVaCreateManagedWidget("issuesView", viewportWidgetClass, v.notes, XtNallowVert, True, XtNheight, 160,
+                                            XtNpreferredPaneSize, 400, XtNmin, 40,
                                             XtNshowGrip, False, NULL);
     v.problem_lines[0] = strdup("");
     v.problem_lines[1] = NULL;
@@ -1032,11 +1040,10 @@ int main(int argc, char **argv) {
     v.issues = XtVaCreateManagedWidget("issues", listWidgetClass, v.issues_view, XtNlist, v.problem_lines,
                                        XtNdefaultColumns, 1, XtNforceColumns, True, XtNverticalList, True, NULL);
     XtAddCallback(v.issues, XtNcallback, issue_chosen, NULL);
-    if (v.run_mode) { XtUnmanageChild(v.issues_title); XtUnmanageChild(v.issues_view); }   /* a run is not edited */
-    v.yaml = XtVaCreateWidget("yaml", asciiTextWidgetClass, v.side, XtNscrollVertical, XawtextScrollWhenNeeded,
-                              XtNpreferredPaneSize, 360, XtNmin, 120,
+    v.yaml = XtVaCreateWidget("yaml", asciiTextWidgetClass, v.notes, XtNscrollVertical, XawtextScrollWhenNeeded,
+                              XtNpreferredPaneSize, 400, XtNmin, 60,
                               XtNeditType, XawtextRead, XtNstring, "", XtNdisplayCaret, False, NULL);
-
+    if (v.run_mode) XtUnmanageChild(v.notes);   /* a run is not edited: its details take the strip */
 
     v.mini = XtVaCreateManagedWidget("mini", formWidgetClass, v.paned, XtNshowGrip, False, XtNskipAdjust, True, NULL);
     v.prompt = XtVaCreateManagedWidget("prompt", labelWidgetClass, v.mini, XtNlabel, "/ finds steps and commands",
