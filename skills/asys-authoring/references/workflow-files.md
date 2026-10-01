@@ -88,11 +88,13 @@ X11; `asys-flow-view -run run` follows a run. Edits keep comments and order.
 ## From BPMN
 
 `asys workflow convert workflow.bpmn -o workflow.yaml` writes the equivalent
-file for tasks, sequence flows, exclusive and parallel gateways, ad-hoc
-subprocesses and end events. It refuses what a workflow file cannot express,
-saying why: an inline script must become a program the environment declares
-(see the team template's `check-report`), and sequence flows inside an ad-hoc
-subprocess, timers, messages, call activities and BPMN loops are not
-converted. Notes report approximations, such as a job without `input`, which
-BPMN gave all variables and the file gives `{request}`. Check the result with
+file for everything that has one: tasks, flows, gateways, subprocesses,
+coordinators, message and timer waits, loops, compensation, and error and timer
+boundary events. It refuses what a workflow file cannot express, saying why:
+an inline script must become a program the environment declares (see the team
+template's `check-report`), a call into another process of the same file must
+become a file of its own, and FEEL script tasks, data objects, signals,
+conditional events and inclusive gateways have no equivalent. Notes report
+approximations, such as a job without `input`, which BPMN gave all variables
+and the file gives `{request}`. Check the result with
 `asys workflow check --environment`.

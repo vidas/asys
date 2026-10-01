@@ -436,20 +436,29 @@ example a checkout's `python3 tools/asys workflow serve`.
 ## Migration
 
 `asys workflow convert FILE.bpmn [-o FILE.yaml]` writes the equivalent YAML for
-the subset the examples and templates use: tasks with `asys:job`, sequence
+everything in BPMN that has an equivalent: tasks with `asys:job`, sequence
 flows, exclusive gateways (decisions and merges), parallel gateways (forks and
-joins; a branch of several steps becomes a group), ad-hoc subprocesses
-(`choose`) and end events. FEEL contexts become YAML mappings, and string
-concatenation becomes `${...}` text. Result variables, and element IDs that are
-not step IDs, are renamed everywhere they are read.
+joins; a branch of several steps becomes a group), subprocesses (groups),
+ad-hoc subprocesses (`choose`), receive tasks and message catch events
+(`wait`), timer catch events (`delay`), multi-instance loops (`for_each`) and
+standard loops (`repeat`), compensation handlers and compensate events (`undo`,
+`compensate`), interrupting error and timer boundary events (`on_error`,
+`timeout`), and end events. FEEL contexts become YAML mappings, string
+concatenation becomes `${...}` text, result variables and element IDs that are
+not step IDs are renamed everywhere they are read, and names a process reads
+but never sets are declared as inputs.
 
 It writes nothing when part of a process cannot be expressed, and says why:
-inline scripts (declare the program in `workers.json` instead), sequence flows
-inside an ad-hoc subprocess, boundary and intermediate events, call activities
-and BPMN loops. Approximations are written and reported as notes: a job without
-`input` received all variables and now receives `{request}`; a decision with no
-default ends at an end step instead of failing; an error end event becomes an
-end labelled as an error.
+inline scripts (declare the program in `workers.json` instead), FEEL script
+tasks that set variables, call activities into another process of the same
+file (move it into a file of its own and `call` it), loop conditions that count
+instances, non-interrupting or code-specific boundary events, sequence flows
+inside an ad-hoc subprocess, data objects, signals, conditional events and
+inclusive or event-based gateways. Approximations are written and reported as
+notes: a job without `input` received all variables and now receives
+`{request}`; a decision with no default ends at an end step instead of
+failing; an error end event becomes an end labelled as an error; a loop that
+tests before its first run becomes a repeat, which runs at least once.
 
 Of the repository's BPMN, agent-task, human-prompt, mixed-review, the
 named-swarm fixture and the goal template convert and validate; hello,

@@ -2,7 +2,9 @@
 
 The subset the examples and templates use converts: tasks with asys:job,
 sequence flows, exclusive gateways (decisions and merges), parallel gateways
-(forks and joins), ad-hoc subprocesses (coordinators) and end events. Job
+(forks and joins), ad-hoc subprocesses (coordinators), end events, and
+boundary events: an interrupting error event that catches any error becomes
+on_error, an interrupting timer becomes timeout and on_timeout. Job
 inputs, FEEL contexts, become YAML mappings: literals stay literals, and string
 concatenation becomes `${...}` text. A result variable or an element ID that is
 not a valid step ID is renamed everywhere it is read.
@@ -62,12 +64,15 @@ class _Process:
         self.ids = {}           # element ID -> step ID
         self.used = set()
         self.renames = {}       # names expressions read -> step IDs
+        self.associations = {}  # source -> target, as compensation handlers are attached
         self._index(process)
 
     def _index(self, container):
         for child in container:
             tag = child.tag.replace(BPMN, '')
             identifier = child.get('id')
+            if tag == 'association':
+                self.associations[child.get('sourceRef')] = child.get('targetRef')
             if tag == 'sequenceFlow':
                 self.flows[identifier] = child
                 self.outgoing.setdefault(child.get('sourceRef'), []).append(child)
@@ -107,9 +112,29 @@ class _Process:
         data['steps'] = steps
         for step in steps.values():
             self.apply_renames(step)
+        read = set()
+        for _, step in flow._all_steps(steps):
+            for key in ('input', 'args', 'for_each'):
+                for expression in flow.interpolations(step.get(key, {})):
+                    read |= flow.expression_names(expression)
+            for case in step.get('switch') or []:
+                read |= flow.expression_names(str(case.get('when', '')))
+            choose = step.get('choose') or {}
+            for expression in flow.interpolations(choose.get('input', {})):
+                read |= flow.expression_names(expression)
+        local = {'request', 'message', 'item', 'index'} | {name for name, _ in flow._all_steps(steps)}
+        local |= {name.rsplit('.', 1)[-1] for name, _ in flow._all_steps(steps)}
+        local |= {step.get('as') for _, step in flow._all_steps(steps) if step.get('as')}
+        extra = sorted(read - local)
+        if extra:   # declared after the name, before the steps, where a reader looks
+            inputs = {'request': {'type': 'string'}, **{name: {} for name in extra}}
+            data = {key: value for key, value in data.items() if key not in ('start', 'steps')}
+            data.update(inputs=inputs, start=start, steps=steps)
+            self.result.notes.append(f'{", ".join(extra)}: read but never set in the process, so declared as run '
+                                     'inputs; as in BPMN, they are null unless the run supplies them')
         for element_id, element in self.elements.items():
             tag = element.tag.replace(BPMN, '')
-            if element_id not in self.ids and tag not in {'startEvent', 'exclusiveGateway', 'parallelGateway'} \
+            if element_id not in self.ids and tag not in {'startEvent', 'exclusiveGateway', 'parallelGateway', 'boundaryEvent'} \
                     and not tag.endswith('Definition') and tag not in {'documentation', 'extensionElements'}:
                 self.result.notes.append(f'{element_id}: not reachable from the start; left out')
         return data
@@ -138,10 +163,43 @@ class _Process:
         name = self.step_id(identifier)
         steps[name] = {}                                         # reserved: a loop back finds it
         if tag in TASKS:
-            steps[name] = self.task(element)
+            if tag == 'scriptTask' and not element.findall(f'{BPMN}extensionElements/{ASYS}job'):
+                self.result.problems.append(f'{identifier}: a FEEL script task sets variables, which a workflow file '
+                                            'does not do; compute the value in the step that needs it')
+            steps[name] = self.loop(element, self.task(element))
             following = self.follow(element, steps, stop)
             if following:
                 steps[name]['next'] = following
+            self.boundaries(element, steps[name], steps, stop)
+        elif tag == 'subProcess' and element.get('triggeredByEvent') != 'true':
+            steps[name] = self.loop(element, self.subprocess(element, name))
+            following = self.follow(element, steps, stop)
+            if following:
+                steps[name]['next'] = following
+            self.boundaries(element, steps[name], steps, stop)
+        elif tag == 'receiveTask' or (tag == 'intermediateCatchEvent'
+                                      and element.find(f'{BPMN}messageEventDefinition') is not None):
+            steps[name] = {'wait': self.message(element)}
+            following = self.follow(element, steps, stop)
+            if following:
+                steps[name]['next'] = following
+            if tag == 'receiveTask':
+                self.boundaries(element, steps[name], steps, stop)
+        elif tag == 'intermediateCatchEvent' and element.find(f'{BPMN}timerEventDefinition/{BPMN}timeDuration') is not None:
+            steps[name] = {'delay': (element.find(f'{BPMN}timerEventDefinition/{BPMN}timeDuration').text or '').strip()}
+            following = self.follow(element, steps, stop)
+            if following:
+                steps[name]['next'] = following
+        elif tag == 'intermediateThrowEvent' and element.find(f'{BPMN}compensateEventDefinition') is not None:
+            activity = element.find(f'{BPMN}compensateEventDefinition').get('activityRef')
+            steps[name] = {'compensate': self.step_id(activity) if activity else 'all'}
+            following = self.follow(element, steps, stop)
+            if following:
+                steps[name]['next'] = following
+        elif tag == 'callActivity':
+            self.result.problems.append(f'{identifier}: calls process {element.get("calledElement")}; move that '
+                                        'process into a file of its own and convert it, then use call: FILE')
+            steps[name] = {'end': 'Unconverted call'}
         elif tag == 'endEvent':
             errors = element.findall(f'{BPMN}errorEventDefinition')
             label = element.get('name') or identifier
@@ -188,13 +246,132 @@ class _Process:
             value = self.value(source, identifier)
             if value != []:
                 step['args'] = value
-        for loop in ('multiInstanceLoopCharacteristics', 'standardLoopCharacteristics'):
-            if element.find(f'{BPMN}{loop}') is not None:
-                self.result.problems.append(f'{identifier}: BPMN loops are not converted; use for_each or repeat')
-        for boundary in self.elements.values():
-            if boundary.tag == f'{BPMN}boundaryEvent' and boundary.get('attachedToRef') == identifier:
-                self.result.problems.append(f'{boundary.get("id")}: boundary events are not converted; use on_error or timeout')
         return step
+
+    LOOP_NAMES = re.compile(r'\b(loopCounter|numberOf\w*Instances|nrOf\w*Instances)\b')
+
+    def loop(self, element, step):
+        """STEP as its loop makes it: multi-instance is for_each, a standard loop repeat."""
+        identifier = element.get('id')
+        many = element.find(f'{BPMN}multiInstanceLoopCharacteristics')
+        if many is not None:
+            collection = many.find(f'{BPMN}loopDataInputRef')
+            cardinality = many.find(f'{BPMN}loopCardinality')
+            item = many.find(f'{BPMN}inputDataItem')
+            if collection is not None and (collection.text or '').strip():
+                step['for_each'] = '${' + collection.text.strip() + '}'
+            elif cardinality is not None and (cardinality.text or '').strip():
+                step['for_each'] = '${for i in 1..(' + _feel(cardinality.text) + ') return i}'
+            else:
+                self.result.problems.append(f'{identifier}: a multi-instance loop needs a collection or a cardinality')
+                return step
+            name = item.get('name') or item.get('id') if item is not None else None
+            if name and name != 'item':
+                step['as'] = name
+            if many.get('isSequential') == 'true':
+                step['sequential'] = True
+            done = many.find(f'{BPMN}completionCondition')
+            if done is not None and (done.text or '').strip():
+                if self.LOOP_NAMES.search(done.text):
+                    self.result.problems.append(f'{identifier}: its completion condition counts instances; write it '
+                                                f'over the finished results instead, as until: ${{count({self.step_id(identifier)}) >= N}}')
+                else:
+                    step['until'] = _feel(done.text)
+            return step
+        standard = element.find(f'{BPMN}standardLoopCharacteristics')
+        if standard is None:
+            return step
+        condition = standard.find(f'{BPMN}loopCondition')
+        maximum = standard.get('loopMaximum')
+        repeat = {'step': {key: value for key, value in step.items() if key != 'description'}}
+        if condition is not None and (condition.text or '').strip():
+            if self.LOOP_NAMES.search(condition.text):
+                self.result.problems.append(f'{identifier}: its loop condition reads loopCounter; a repeat has no counter, '
+                                            'so write the condition over the step\'s result')
+            repeat['until'] = 'not(' + _feel(condition.text) + ')'
+        if maximum:
+            repeat['max'] = int(maximum)
+        if 'until' not in repeat and 'max' not in repeat:
+            self.result.problems.append(f'{identifier}: a standard loop needs a condition or a maximum')
+        if standard.get('testBefore') == 'true':
+            self.result.notes.append(f'{identifier}: BPMN tests the loop condition before the first run; a repeat '
+                                     'always runs its step once')
+        wrapped = {'repeat': repeat}
+        if 'description' in step:
+            wrapped['description'] = step['description']
+        return wrapped
+
+    def subprocess(self, element, name):
+        """A subprocess as a group; outside it, its steps' results are read through it."""
+        inner = _Process(element, self.root, self.result)
+        inner.ids, inner.used = self.ids, self.used
+        starts = [e for e in inner.elements.values() if e.tag == f'{BPMN}startEvent']
+        if len(starts) != 1:
+            self.result.problems.append(f'{element.get("id")}: a subprocess needs one start event')
+            return {'group': {'start': None, 'steps': {}}}
+        steps = {}
+        start = inner.follow(starts[0], steps)
+        for step in steps.values():
+            inner.apply_renames(step)
+        for result_name, step_id in inner.renames.items():
+            self.renames[result_name] = f'{name}.{step_id}'
+        group = {'group': {'start': start, 'steps': steps}}
+        if element.get('name') and element.get('name') != element.get('id'):
+            group['description'] = element.get('name')
+        return group
+
+    def message(self, element):
+        """The message a receive task or catch event waits for, by name."""
+        definition = element.find(f'{BPMN}messageEventDefinition')
+        reference = (definition if definition is not None else element).get('messageRef')
+        for message in self.root.iter(f'{BPMN}message'):
+            if message.get('id') == reference:
+                return message.get('name') or reference
+        return reference or element.get('id')
+
+    def boundaries(self, element, step, steps, stop):
+        """A task's boundary events as its error and timeout paths.
+
+        An interrupting error event that catches any error is on_error; an
+        interrupting timer with a duration is timeout and on_timeout.
+        """
+        identifier = element.get('id')
+        for boundary in self.elements.values():
+            if boundary.tag != f'{BPMN}boundaryEvent' or boundary.get('attachedToRef') != identifier:
+                continue
+            name = boundary.get('id')
+            if boundary.find(f'{BPMN}compensateEventDefinition') is not None:
+                handler = self.elements.get(self.associations.get(name))
+                if handler is None:
+                    self.result.problems.append(f'{name}: a compensation event without its handler')
+                    continue
+                undo = self.step_id(handler.get('id'))
+                if undo not in steps:
+                    steps[undo] = self.task(handler)
+                step['undo'] = undo
+                continue
+            if boundary.get('cancelActivity', 'true') != 'true':
+                self.result.problems.append(f'{name}: a non-interrupting boundary event has no workflow file equivalent')
+                continue
+            error = boundary.find(f'{BPMN}errorEventDefinition')
+            timer = boundary.find(f'{BPMN}timerEventDefinition')
+            if error is not None:
+                if error.get('errorRef'):
+                    self.result.problems.append(f'{name}: catches one error code; on_error catches every failure')
+                    continue
+                if 'on_error' in step:
+                    self.result.problems.append(f'{name}: {identifier} already has an error path')
+                    continue
+                target = self.follow(boundary, steps, stop)
+                if target:
+                    step['on_error'] = target
+            elif timer is not None and timer.find(f'{BPMN}timeDuration') is not None:
+                step['timeout'] = (timer.find(f'{BPMN}timeDuration').text or '').strip()
+                target = self.follow(boundary, steps, stop)
+                if target:
+                    step['on_timeout'] = target
+            else:
+                self.result.problems.append(f'{name}: only error events and timers with a duration convert')
 
     def decision(self, element, steps, stop):
         identifier = element.get('id')
@@ -237,6 +414,7 @@ class _Process:
             if len(chain) == 1 and chain[0].tag.replace(BPMN, '') in TASKS:
                 name = self.step_id(chain[0].get('id'))
                 steps[name] = self.task(chain[0])
+                self.boundaries(chain[0], steps[name], steps, None)
             else:
                 # A longer branch is a group; outside it, its steps' results
                 # are read through the group.
@@ -413,10 +591,7 @@ def _value(source):
         return mapping
     if _enclosed(text, '[', ']'):
         inner = text[1:-1].strip()
-        items = [_value(item) for item in _split(inner, ',')] if inner else []
-        if all(not (isinstance(item, str) and item.startswith('${')) for item in items):
-            return items
-        return '${' + text + '}'
+        return [_value(item) for item in _split(inner, ',')] if inner else []
     literal = _string(text)
     if literal is not None:
         return literal

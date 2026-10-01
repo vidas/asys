@@ -345,6 +345,61 @@ class ConvertTests(unittest.TestCase):
         self.assertIsNone(text)
         self.assertIn('sequence flows inside an ad-hoc subprocess', result.problems[0])
 
+    def test_every_construct_with_an_equivalent_converts(self):
+        from asys.flow_convert import convert
+        job = '<bpmn:extensionElements><asys:job type="program" input="= {n: 1}"/></bpmn:extensionElements>'
+        flows = [('start', 'reserve'), ('reserve', 'each'), ('each', 'twice'), ('twice', 'nested'), ('nested', 'approval'),
+                 ('approval', 'pause'), ('pause', 'rollback'), ('rollback', 'done'), ('timeout', 'done')]
+        source = f'''<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+            xmlns:asys="urn:asys:workflow:1" id="All"><bpmn:message id="m1" name="approved"/>
+          <bpmn:process id="all" isExecutable="true">
+            <bpmn:startEvent id="start"/>
+            <bpmn:task id="reserve">{job}</bpmn:task>
+            <bpmn:boundaryEvent id="comp" attachedToRef="reserve" cancelActivity="false"><bpmn:compensateEventDefinition/></bpmn:boundaryEvent>
+            <bpmn:task id="release" isForCompensation="true">{job}</bpmn:task>
+            <bpmn:association id="a1" sourceRef="comp" targetRef="release"/>
+            <bpmn:task id="each">{job}<bpmn:multiInstanceLoopCharacteristics isSequential="true">
+              <bpmn:loopDataInputRef>parts</bpmn:loopDataInputRef><bpmn:inputDataItem id="part" name="part"/>
+              <bpmn:completionCondition>each[1].n = 1</bpmn:completionCondition></bpmn:multiInstanceLoopCharacteristics></bpmn:task>
+            <bpmn:task id="twice">{job}<bpmn:standardLoopCharacteristics loopMaximum="2">
+              <bpmn:loopCondition>twice.n &lt; 1</bpmn:loopCondition></bpmn:standardLoopCharacteristics></bpmn:task>
+            <bpmn:subProcess id="nested"><bpmn:startEvent id="s2"/><bpmn:task id="inner">{job}</bpmn:task>
+              <bpmn:sequenceFlow id="f_s2" sourceRef="s2" targetRef="inner"/></bpmn:subProcess>
+            <bpmn:receiveTask id="approval" messageRef="m1"/>
+            <bpmn:boundaryEvent id="late" attachedToRef="approval"><bpmn:timerEventDefinition><bpmn:timeDuration>P1D</bpmn:timeDuration></bpmn:timerEventDefinition></bpmn:boundaryEvent>
+            <bpmn:intermediateCatchEvent id="pause"><bpmn:timerEventDefinition><bpmn:timeDuration>PT10M</bpmn:timeDuration></bpmn:timerEventDefinition></bpmn:intermediateCatchEvent>
+            <bpmn:intermediateThrowEvent id="rollback"><bpmn:compensateEventDefinition/></bpmn:intermediateThrowEvent>
+            <bpmn:endEvent id="done"/><bpmn:sequenceFlow id="f_late" sourceRef="late" targetRef="timeout"/>
+            <bpmn:task id="timeout">{job}</bpmn:task>
+            {"".join(f'<bpmn:sequenceFlow id="f_{a}" sourceRef="{a}" targetRef="{b}"/>' for a, b in flows)}
+          </bpmn:process></bpmn:definitions>'''
+        text, result = convert(source)
+        self.assertEqual(result.problems, [])
+        steps = flow.yaml().load(text)['steps']
+        self.assertEqual(steps['reserve']['undo'], 'release')
+        self.assertEqual((steps['each']['for_each'], steps['each']['as'], steps['each']['sequential'], steps['each']['until']),
+                         ('${parts}', 'part', True, 'each[1].n = 1'))
+        self.assertEqual(steps['twice']['repeat']['until'], 'not(twice.n < 1)')
+        self.assertEqual(steps['twice']['repeat']['max'], 2)
+        self.assertEqual(steps['nested']['group']['start'], 'inner')
+        self.assertEqual((steps['approval']['wait'], steps['approval']['timeout'], steps['approval']['on_timeout']),
+                         ('approved', 'P1D', 'timeout'))
+        self.assertEqual(steps['pause']['delay'], 'PT10M')
+        self.assertEqual(steps['rollback']['compensate'], 'all')
+        problems = [str(p) for p in flow.check(flow.load_all(self.write_text(text)))]
+        self.assertEqual(problems, [])
+        # What has no equivalent is refused, with what to do instead.
+        refused = source.replace('<bpmn:receiveTask id="approval" messageRef="m1"/>',
+                                 '<bpmn:callActivity id="approval" calledElement="other"/>')
+        self.assertIn('move that process into a file of its own', convert(refused)[1].problems[0])
+
+    def write_text(self, text):
+        directory = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__('shutil').rmtree(directory))
+        path = Path(directory) / 'workflow.yaml'
+        path.write_text(text)
+        return path
+
     def test_feel_contexts_become_yaml_with_text_in_place_of_concatenation(self):
         from asys.flow_convert import _value
         self.assertEqual(_value('{request: "Fix: " + issue.title + ".", n: 3, ok: true, tags: ["a", "b"], raw: items}'),
