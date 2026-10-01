@@ -298,6 +298,11 @@ class RunViewTests(Fixture):
                                                               'time': 't', 'data': data}) + '\n'
                                                   for sequence, kind, step, data in events))
         session = Session()
+        # By ID prefix, as asys-flow-view -run takes it, as well as by directory.
+        by_id = handle(Session(), {'op': 'open', 'run': run.name[:8], 'root': str(self.root)})
+        self.assertEqual(by_id['run']['id'], run.name)
+        with self.assertRaisesRegex(ValueError, 'No run matching'):
+            handle(Session(), {'op': 'open', 'run': 'ffff', 'root': str(self.root)})
         opened = handle(session, {'op': 'open', 'run': str(run)})
         self.assertIn('search/global_search', {node['id'] for node in opened['graph']['nodes']})
         self.assertEqual(opened['run']['name'], 'Delivery')
@@ -409,6 +414,37 @@ class ConvertTests(unittest.TestCase):
                          {'request': 'Fix: ${issue.title}.', 'n': 3, 'ok': True, 'tags': ['a', 'b'], 'raw': '${items}'})
         self.assertEqual(_value('{"quoted key": {inner: null}}'), {'quoted key': {'inner': None}})
         self.assertEqual(_value('count(items) + 1'), '${count(items) + 1}')
+
+
+class StartRunTests(Fixture):
+    def test_a_saved_workflow_starts_asys_run_and_names_the_run(self):
+        import os
+        import stat
+        from unittest import mock
+        from asys.flow_service import EditError, Session, start_run
+        bin_dir = self.root / 'bin'
+        bin_dir.mkdir()
+        fake = bin_dir / 'asys-run'
+        fake.write_text('#!/bin/sh\necho "Run 0123456789abcdef0123456789abcdef" >&2\n'
+                        'echo "$@" > "$(dirname "$0")/arguments"\nsleep 30\n')
+        fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+        session = Session()
+        session.load(self.write(WORKFLOW), self.environment)
+        with mock.patch.dict(os.environ, {'PATH': f'{bin_dir}:{os.environ["PATH"]}'}), \
+                mock.patch('sys.argv', [str(self.root / 'nowhere/asys')]):
+            started = start_run(session, 'Build it.')
+            self.assertEqual(started['run'], '0123456789abcdef0123456789abcdef')
+            arguments = (bin_dir / 'arguments').read_text().split()
+            self.assertEqual(arguments[:2], [str(self.environment), str(session.workflow.path)])
+            self.assertIn('--workspace', arguments)
+            session.set('brief', 'description', 'changed')
+            with self.assertRaisesRegex(EditError, 'save the workflow first'):
+                start_run(session, 'Again.')
+            session.save()
+            session.environment = None
+            with self.assertRaisesRegex(EditError, 'no environment'):
+                start_run(session, 'Again.')
+        os.system(f'pkill -f "{fake}" >/dev/null 2>&1')
 
 
 class ConvertCommandTests(unittest.TestCase):

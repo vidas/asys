@@ -24,7 +24,7 @@ class RunView:
     def __init__(self, selector, root=None):
         runs = Runs(state_root('runs', root=root))
         path = Path(selector).expanduser()
-        self.directory = path.resolve() if path.is_dir() else runs.resolve(selector)
+        self.directory = path.resolve() if path.is_dir() else runs.select(selector)
         self.runs = runs
         document = json.loads((self.directory / 'workflow/workflow.json').read_text())
         self.root = document['root']

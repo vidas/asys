@@ -15,6 +15,9 @@ Requests (`id` is echoed back):
   {"op": "undo"} {"op": "redo"} {"op": "save"} {"op": "check"}
   {"op": "inspect", "step": PATH}          the step's own fields; "" the file's, without steps
 
+Running the loaded file (it must be saved; asys-run reads it from disk):
+  {"op": "start", "request": TEXT, "environment": DIR?, "workspace": DIR?}   run ID and asys-run's log
+
 Following a run (read-only; the graph is the run's saved document):
   {"op": "open", "run": DIRECTORY|ID, "root": STATE?}   graph, run status, step states
   {"op": "poll"}                                         run status, step states
@@ -23,7 +26,12 @@ Following a run (read-only; the graph is the run's saved document):
 import io
 import json
 from pathlib import Path
+import re
+import shutil
+import subprocess
 import sys
+import tempfile
+import time
 
 from . import flow, flow_layout
 from .flow_runs import RunView
@@ -246,8 +254,47 @@ class Session:
         return holder.get('group') if isinstance(holder.get('group'), dict) else None
 
 
+START_WAIT = 120   # seconds asys-run may take before it names its run
+
+
+def start_run(session, request, environment=None, workspace=None):
+    """Start asys-run on the loaded file; return its run ID and log.
+
+    asys-run monitors the run until it ends, in a session of its own, so
+    closing the viewer does not stop the run. Its output goes to a log file.
+    """
+    if session.workflow is None:
+        raise EditError('load a workflow first')
+    if session.text() != session.saved:
+        raise EditError('save the workflow first: asys-run runs the file on disk')
+    environment = environment or (str(session.environment) if session.environment else None)
+    if not environment:
+        raise EditError('no environment: give -environment or set ASYS_ENVIRONMENT_DIR')
+    if not str(request or '').strip():
+        raise EditError('a run needs a request')
+    here = Path(sys.argv[0]).resolve().parent / 'asys-run'
+    command = [str(here) if here.is_file() else shutil.which('asys-run') or 'asys-run',
+               str(environment), str(session.workflow.path), str(request)]
+    command += ['--workspace', str(Path(workspace or session.workflow.path.parent).expanduser().resolve())]
+    log = Path(tempfile.mkstemp(prefix='asys-flow-run-', suffix='.log')[1])
+    with log.open('wb') as output:
+        process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
+                                   start_new_session=True, cwd=str(session.workflow.path.parent))
+    deadline = time.monotonic() + START_WAIT
+    while time.monotonic() < deadline:
+        found = re.search(r'^Run ([0-9a-f]{32})$', log.read_text(errors='replace'), re.MULTILINE)
+        if found:
+            return {'run': found.group(1), 'log': str(log)}
+        if process.poll() is not None:
+            raise EditError(f'asys-run stopped before starting a run: {log.read_text(errors="replace").strip()[-400:]}')
+        time.sleep(0.2)
+    raise EditError(f'asys-run did not name a run within {START_WAIT} seconds; see {log}')
+
+
 def handle(session, request):
     op = request.get('op')
+    if op == 'start':
+        return start_run(session, request.get('request'), request.get('environment'), request.get('workspace'))
     if op == 'open':
         session.run = RunView(request['run'], request.get('root'))
         return {'graph': session.run.graph(), **session.run.poll()}

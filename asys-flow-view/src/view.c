@@ -36,6 +36,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <limits.h>
 
 #include "Map.h"
 #include "json.h"
@@ -46,7 +48,8 @@
 #define MAX_ITEMS 512
 #define PALETTE_ROWS 14
 
-typedef enum { MINI_NONE, MINI_PALETTE, MINI_RENAME, MINI_ADD, MINI_CONNECT, MINI_ON_ERROR, MINI_FIELD } MiniMode;
+typedef enum { MINI_NONE, MINI_PALETTE, MINI_RENAME, MINI_ADD, MINI_CONNECT, MINI_ON_ERROR, MINI_FIELD,
+               MINI_RUN, MINI_FOLLOW } MiniMode;
 
 typedef struct {
     char *key;              /* dotted path inside the step */
@@ -77,6 +80,16 @@ static struct {
     char *problem_steps[MAX_ITEMS];
     int problem_count, listed;        /* listed: the lines the issues List holds */
 } v;
+
+/* The program's own options are resources, as the toolkit's are. */
+static struct {
+    String environment, run, root, service, workspace;
+    XFontStruct *title_font, *step_font;
+    Boolean help;
+} options;
+
+static void follow(const char *run);
+static void start_run(const char *text);
 
 /* Utilities */
 
@@ -629,6 +642,10 @@ static void mini_accept(void) {
         free(v.selected);
         v.selected = *scope ? format("%s/%s", scope, value) : strdup(value);
         MapSelect(v.map, v.selected);
+    } else if (mode == MINI_RUN) {
+        start_run(value);
+    } else if (mode == MINI_FOLLOW) {
+        if (*value) follow(value);
     } else if (mode == MINI_ADD) {
         /* NAME [WORKER]: a run step after the selection, continuing where it continued. */
         char name[128] = "", worker[128] = "";
@@ -655,6 +672,38 @@ static void mini_accept(void) {
     free(value);
 }
 
+/* Runs */
+
+static char *self_path;     /* this program, to open a window on a run */
+
+static void follow(const char *run) {
+    pid_t child = fork();
+    if (child == 0) {
+        setsid();
+        char *argv[] = { self_path, "-run", (char *)run, "-service", options.service, NULL };
+        execv(self_path, argv);
+        _exit(127);
+    }
+    if (child < 0) status("Cannot open a window on run %s.", run);
+    else status("Following run %.8s in its own window.", run);
+}
+
+static void started(const Json *reply, void *data) {
+    (void)data;
+    if (failed(reply)) return;
+    const char *run = json_get_string(reply, "run");
+    if (run) follow(run);
+}
+
+static void start_run(const char *text) {
+    Json *r = request("start");
+    json_set(r, "request", json_string(text));
+    if (v.environment) json_set(r, "environment", json_string(v.environment));
+    if (options.workspace) json_set(r, "workspace", json_string(options.workspace));
+    service_send(r, started, NULL);
+    status("Starting asys-run; the run opens in its own window.");
+}
+
 /* Commands */
 
 static void reload_reply(const Json *reply, void *data) { apply_state(reply, data); }
@@ -664,6 +713,14 @@ static void command(const char *name) {
     if (!strcmp(name, "fit")) { MapZoom(v.map, 0); return; }
     if (!strcmp(name, "full size")) { MapSetZoom(v.map, 1.0); return; }
     if (!strcmp(name, "go to")) { mini_open(MINI_PALETTE, "Go to:", ""); return; }
+    if (!strcmp(name, "follow run")) { mini_open(MINI_FOLLOW, "Follow run (ID or prefix):", ""); return; }
+    if (!strcmp(name, "start run")) {
+        if (v.run_mode) { status("This window follows a run; open the workflow file to start another."); return; }
+        if (v.dirty) { status("Save first: asys-run runs the file on disk."); return; }
+        if (!v.environment) { status("No environment: give -environment or set ASYS_ENVIRONMENT_DIR."); return; }
+        mini_open(MINI_RUN, "Run with request:", "");
+        return;
+    }
     if (!strcmp(name, "zoom in")) { MapZoom(v.map, 1.2); return; }
     if (!strcmp(name, "zoom out")) { MapZoom(v.map, 1 / 1.2); return; }
     if (!strcmp(name, "toggle panel")) {
@@ -902,18 +959,13 @@ static String fallback[] = {
     NULL,
 };
 
-/* The program's own options are resources, as the toolkit's are. */
-static struct {
-    String environment, run, root, service;
-    XFontStruct *title_font, *step_font;
-    Boolean help;
-} options;
 
 static XrmOptionDescRec option_table[] = {
     { "-environment", "*environmentDirectory", XrmoptionSepArg, NULL },
     { "-run", "*run", XrmoptionSepArg, NULL },
     { "-root", "*root", XrmoptionSepArg, NULL },
     { "-service", "*service", XrmoptionSepArg, NULL },
+    { "-workspace", "*workspace", XrmoptionSepArg, NULL },
     { "-help", "*help", XrmoptionNoArg, (XPointer)"True" },
 };
 
@@ -923,6 +975,7 @@ static XtResource option_resources[] = {
     { "run", "Run", XtRString, sizeof(String), OPTION(run), XtRString, NULL },
     { "root", "Root", XtRString, sizeof(String), OPTION(root), XtRString, NULL },
     { "service", "Service", XtRString, sizeof(String), OPTION(service), XtRString, (XtPointer)"asys workflow serve" },
+    { "workspace", "Workspace", XtRString, sizeof(String), OPTION(workspace), XtRString, NULL },
     { "titleFont", "Font", XtRFontStruct, sizeof(XFontStruct *), OPTION(title_font), XtRString, (XtPointer)XtDefaultFont },
     { "stepFont", "Font", XtRFontStruct, sizeof(XFontStruct *), OPTION(step_font), XtRString, (XtPointer)XtDefaultFont },
     { "help", "Help", XtRBoolean, sizeof(Boolean), OPTION(help), XtRImmediate, (XtPointer)False },
@@ -932,6 +985,7 @@ static XtResource option_resources[] = {
 static char map_keys[] =
     "<Key>slash: palette()\n"
     "Ctrl<Key>s: command(save)\n"
+    "Ctrl<Key>r: command(\"start run\")\n"
     "Ctrl Shift<Key>z: command(redo)\n"
     "Ctrl<Key>z: command(undo)\n"
     "Ctrl<Key>y: command(redo)\n"
@@ -990,6 +1044,8 @@ int main(int argc, char **argv) {
                                 sessionShellWidgetClass, NULL);
     XtGetApplicationResources(v.top, &options, option_resources, XtNumber(option_resources), NULL, 0);
     if (options.help) usage(stdout, 0);
+    self_path = realpath("/proc/self/exe", NULL);
+    if (!self_path) self_path = argv[0];
     if (argc > 2 || (argc == 2 && argv[1][0] == '-')) usage(stderr, 2);
     v.file = argc == 2 ? strdup(argv[1]) : NULL;
     /* The environment asys gives its jobs, ASYS_ENVIRONMENT_DIR, unless -environment names another. */
@@ -1029,6 +1085,9 @@ int main(int argc, char **argv) {
     menu(v.bar, "file", "File", file_entries);
     if (!v.run_mode) menu(v.bar, "edit", "Edit", edit_entries);
     menu(v.bar, "view", "View", view_entries);
+    static const char *const run_entries[][2] = { { "Start run...      Ctrl+R", "start run" },
+                                                  { "Follow run...", "follow run" }, { NULL, NULL } };
+    menu(v.bar, "run", "Run", run_entries);
 
     /* The map above, at the window's full width; the panel a strip beneath it,
      * in two columns: what is selected and its fields, then its problems or
