@@ -7,6 +7,11 @@
  * shows state by form: open steps have not run, filled ones have, the running
  * one has the verde cursor beneath it, and a failure says so in words.
  *
+ * The rail carries order the way a line carries words: a run longer than the
+ * window wraps into lines, left to right and top to bottom, breaking only
+ * between columns. A rail that continues on the next line returns along the
+ * left margin, like a carriage return.
+ *
  * Everything is drawn with XRender into a back buffer, so shapes are
  * antialiased, and text with Xft.
  */
@@ -24,7 +29,9 @@
 #define STEP 26.0            /* triangle base */
 #define RAIL 2.0
 #define THIN 1.25
-#define MARGIN 48.0
+#define MARGIN 40.0
+#define LINE_GAP 1.4         /* units between wrapped lines: labels and returning rails */
+#define BAR 7.0              /* scrollbar thickness */
 
 enum { C_PAPER, C_INK, C_RAIL, C_CAMPO, C_VERDE, C_BLU, C_ROSSO, C_GIALLO };
 
@@ -71,15 +78,15 @@ static double z(MapWidget w, double length) { return length * w->map.zoom; }
 
 typedef struct { double x, y; } Point;
 
-static double rail_y(MapWidget w, const MapNode *n) { return py(w, n->y + n->h / 2); }
+static double rail_y(MapWidget w, const MapNode *n) { return py(w, n->ly + n->h / 2); }
 
 static Point node_in(MapWidget w, const MapNode *n) {
-    Point p = { px(w, n->x) + (n->box ? 0 : z(w, 10)), rail_y(w, n) };
+    Point p = { px(w, n->lx) + (n->box ? 0 : z(w, 10)), rail_y(w, n) };
     return p;
 }
 
 static Point node_out(MapWidget w, const MapNode *n) {
-    Point p = { px(w, n->x + n->w) - (n->box ? 0 : z(w, 10)), rail_y(w, n) };
+    Point p = { px(w, n->lx + n->w) - (n->box ? 0 : z(w, 10)), rail_y(w, n) };
     return p;
 }
 
@@ -226,22 +233,54 @@ static int is_thin(const char *role) {
     return !strcmp(role, "error") || !strcmp(role, "timeout") || !strcmp(role, "undo") || !strcmp(role, "compensate");
 }
 
+/* POINTS, a path of horizontal and vertical runs, with each corner cut at
+ * 45 degrees: rails never turn square. */
+static int chamfer(MapWidget w, const Point *points, int count, Point *out) {
+    int n = 0;
+    out[n++] = points[0];
+    for (int i = 1; i + 1 < count; i++) {
+        Point p = points[i], before = points[i - 1], after = points[i + 1];
+        double in = hypot(p.x - before.x, p.y - before.y), away = hypot(after.x - p.x, after.y - p.y);
+        double cut = fmin(z(w, 12), fmin(in, away) / 2);
+        if (cut < 0.5) { out[n++] = p; continue; }
+        out[n++] = (Point){ p.x - (p.x - before.x) / in * cut, p.y - (p.y - before.y) / in * cut };
+        out[n++] = (Point){ p.x + (after.x - p.x) / away * cut, p.y + (after.y - p.y) / away * cut };
+    }
+    out[n++] = points[count - 1];
+    return n;
+}
+
 static int route(MapWidget w, const MapEdge *e, Point *points) {
     const MapNode *from = &w->map.nodes[e->from], *to = &w->map.nodes[e->to];
     Point a = node_out(w, from), b = node_in(w, to);
     double dy = b.y - a.y, rise = fabs(dy);
     int n = 0;
-    points[n++] = a;
-    if (e->back || b.x < a.x + z(w, 4)) {
-        /* A return arc: down from the source, back along a lane, up into the target. */
-        double lane = fmax(py(w, from->y + from->h), py(w, to->y + to->h)) + z(w, 0.3 * UNIT_Y);
-        points[n++] = (Point){ a.x + (lane - a.y), lane };
-        points[n++] = (Point){ b.x - (lane - b.y), lane };
-        points[n++] = b;
-        return n;
+    if (from->line != to->line) {
+        /* Onto another line: down into the gap below this one, along the left
+         * margin, through the gap above the target's line, and down onto its
+         * rail just before it, never along another step's rail. A return to an
+         * earlier line takes the outer lanes. */
+        int back = to->line < from->line;
+        double gap = z(w, LINE_GAP * UNIT_Y);
+        double below = py(w, w->map.line_bottom[from->line]) + gap * (back ? 0.62 : 0.4);
+        double above = py(w, w->map.line_top[to->line]) - gap * (back ? 0.62 : 0.4);
+        double margin = px(w, 0) - z(w, back ? 30 : 16), drop = b.x - z(w, 16);
+        Point path[8] = { a, { a.x + z(w, 14), a.y }, { a.x + z(w, 14), below }, { margin, below },
+                          { margin, above }, { drop, above }, { drop, b.y }, b };
+        return chamfer(w, path, 8, points);
     }
+    if (e->back || b.x < a.x + z(w, 4)) {
+        /* A return: down from the source, back along a lane under the line,
+         * and up into the target. */
+        double lane = fmax(py(w, from->ly + from->h), py(w, to->ly + to->h)) + z(w, 0.3 * UNIT_Y);
+        Point path[6] = { a, { a.x + z(w, 14), a.y }, { a.x + z(w, 14), lane }, { b.x - z(w, 14), lane },
+                          { b.x - z(w, 14), b.y }, b };
+        return chamfer(w, path, 6, points);
+    }
+    points[n++] = a;
     if (rise > 0.5 && b.x - a.x > rise) {
-        int fork = is_gateway(from) || !strcmp(e->role, "branch") || !strcmp(e->role, "case") ||
+        /* Branches and exits leave at once; flows into a join converge late. */
+        int fork = is_gateway(from) || is_thin(e->role) || !strcmp(e->role, "branch") || !strcmp(e->role, "case") ||
                    !strcmp(e->role, "default") || !strcmp(e->role, "action");
         if (fork) points[n++] = (Point){ a.x + rise, b.y };      /* split at the gateway */
         else points[n++] = (Point){ b.x - rise, a.y };            /* converge before the join */
@@ -251,27 +290,42 @@ static int route(MapWidget w, const MapEdge *e, Point *points) {
 }
 
 static void draw_edge(MapWidget w, const MapEdge *e) {
-    Point points[6];
+    Point points[16];
     int count = route(w, e, points);
     int thin = is_thin(e->role);
     polyline(w, edge_color(w, e), points, count, z(w, thin ? THIN : RAIL));
-    /* Labels sit just after the bend, where the eye leaves the gateway. */
-    Point at = points[count > 2 ? 1 : 0];
-    double x = at.x + z(w, 8), y = at.y - z(w, 6);
-    if (!strcmp(e->role, "case") && e->label) {
-        XftColor *color = &w->map.text_soft;
-        text(w, w->map.mono, color, x, y, e->label);
-    } else if (!strcmp(e->role, "default")) {
-        caps(w, &w->map.text_soft, x, y, "default", 0);
-    } else if (thin) {
-        caps(w, &w->map.text_soft, x, y, !strcmp(e->role, "error") ? "on error" : e->role, 0);
+    /* A label rides the edge's longest straight run above the rail, shortened
+     * to fit it; the inspector has the whole condition. */
+    const char *label = !strcmp(e->role, "case") ? e->label : !strcmp(e->role, "default") ? "default"
+                      : !strcmp(e->role, "error") ? "on error" : thin ? e->role : NULL;
+    if (!label) return;
+    int best = -1;
+    double room = 0;
+    for (int i = 0; i + 1 < count; i++) {
+        double run = points[i + 1].x - points[i].x;
+        if (fabs(points[i + 1].y - points[i].y) < 0.5 && run > room) { room = run; best = i; }
+    }
+    room -= z(w, 34);   /* clear of the steps at either end */
+    if (best < 0 || room < z(w, 24)) return;
+    double x = points[best].x + z(w, 14), y = points[best].y - z(w, 6);
+    if (!strcmp(e->role, "case")) {
+        char shown[160];
+        snprintf(shown, sizeof shown, "%s", label);
+        for (size_t length = strlen(shown); length > 1 && text_width(w, w->map.mono, shown) > room; ) {
+            length--;
+            while (length > 1 && (shown[length] & 0xC0) == 0x80) length--;   /* whole characters */
+            snprintf(shown + length, sizeof shown - length, "…");
+        }
+        text(w, w->map.mono, &w->map.text_soft, x, y, shown);
+    } else if (caps(w, NULL, 0, 0, label, 1) <= room) {
+        caps(w, &w->map.text_soft, x, y, label, 0);
     }
 }
 
 /* Fields: a group or repeat is a flat band of campo the rail crosses. */
 
 static void draw_field(MapWidget w, const MapNode *n, int index) {
-    double x = px(w, n->x), y = py(w, n->y), width = z(w, n->w * UNIT_X), height = z(w, n->h * UNIT_Y);
+    double x = px(w, n->lx), y = py(w, n->ly), width = z(w, n->w * UNIT_X), height = z(w, n->h * UNIT_Y);
     rectangle(w, C_CAMPO, x, y, width, height);
     if (w->map.selected == index) rectangle(w, C_VERDE, x, y, width, z(w, 3));
     char label[160];
@@ -361,11 +415,11 @@ static void draw_step(MapWidget w, const MapNode *n, int index) {
         double width = caps(w, NULL, 0, 0, "failed", 1);
         caps(w, &w->map.text_ink, cx - width / 2, line, "failed", 0);
     }
-    if (n->problem) {
-        line += z(w, 16);
-        double width = text_width(w, w->map.sans, n->problem), x = cx - width / 2;
-        rectangle(w, C_INK, x - z(w, 8), line - z(w, 8), z(w, 4), z(w, 2));
-        text(w, w->map.sans, &w->map.text_ink, x, line, n->problem);
+    if (n->problem) {   /* marked here; the panel says what it is */
+        line += z(w, 14);
+        double width = caps(w, NULL, 0, 0, "problem", 1), x = cx - width / 2;
+        rectangle(w, C_INK, x - z(w, 9), line - z(w, 5), z(w, 5), z(w, 2));
+        caps(w, &w->map.text_ink, x, line, "problem", 0);
     }
     if (n->label && strcmp(n->label, n->step)) {   /* a description reads above the step */
         double width = text_width(w, w->map.sans, n->label);
@@ -373,12 +427,15 @@ static void draw_step(MapWidget w, const MapNode *n, int index) {
     }
 }
 
+static int scrollbar(MapWidget w, int axis, double *track, double *start, double *length);
+
 static void render(MapWidget w) {
     if (!XtIsRealized((Widget)w) || !w->map.picture) return;
     rectangle(w, C_PAPER, 0, 0, w->map.width, w->map.height);
-    if (!w->map.node_count) {
-        caps(w, &w->map.text_soft, MARGIN, MARGIN, "no workflow", 0);
-    }
+    /* The spec line opens the page, top left, as on the style guide's sheets. */
+    double head = w->map.offset_y - z(w, (LINE_GAP + 0.1) * UNIT_Y);
+    caps(w, &w->map.text_soft, MARGIN - w->map.scroll_x, head,
+         w->map.spec ? w->map.spec : w->map.node_count ? "workflow" : "no workflow", 0);
     for (int i = 0; i < w->map.node_count; i++)
         if (w->map.nodes[i].box) draw_field(w, &w->map.nodes[i], i);
     for (int i = 0; i < w->map.edge_count; i++) {
@@ -416,6 +473,17 @@ static void render(MapWidget w) {
         Point from = node_out(w, &w->map.nodes[w->map.selected]);
         polyline(w, C_VERDE, (Point[]){ from, { w->map.pointer_x, w->map.pointer_y } }, 2, z(w, RAIL));
     }
+    /* Scrollbars, only when the page is larger than the window: a campo
+     * track and an ink thumb, flat like everything else. */
+    double track, start, length;
+    if (scrollbar(w, 'v', &track, &start, &length)) {
+        rectangle(w, C_CAMPO, w->map.width - BAR - 3, 3, BAR, track);
+        rectangle(w, C_RAIL, w->map.width - BAR - 3, 3 + start, BAR, length);
+    }
+    if (scrollbar(w, 'h', &track, &start, &length)) {
+        rectangle(w, C_CAMPO, 3, w->map.height - BAR - 3, track, BAR);
+        rectangle(w, C_RAIL, 3 + start, w->map.height - BAR - 3, length, BAR);
+    }
 }
 
 static void show(MapWidget w) {
@@ -450,14 +518,6 @@ static void make_buffer(MapWidget w) {
 
 static char *copy(const char *s) { return s ? strdup(s) : NULL; }
 
-/* At the current zoom, the run starts at the left margin with its rail
- * centred; a long run leaves the page on the right, as the style guide has it. */
-static void home(MapWidget w) {
-    double span_y = fmax(w->map.max_y - w->map.min_y, 1);
-    w->map.offset_x = MARGIN + 30 * w->map.zoom - w->map.min_x * UNIT_X * w->map.zoom;
-    w->map.offset_y = (w->map.height - span_y * UNIT_Y * w->map.zoom) / 2 - w->map.min_y * UNIT_Y * w->map.zoom;
-    show(w);
-}
 
 static void clear_graph(MapWidget w) {
     for (int i = 0; i < w->map.node_count; i++) {
@@ -477,6 +537,111 @@ static int find(MapWidget w, const char *id) {
     return -1;
 }
 
+/* Wrapping */
+
+static double left_pad(MapWidget w) { return MARGIN + z(w, 40); }    /* the start tick and returning rails */
+static double top_pad(MapWidget w) { return MARGIN + z(w, (LINE_GAP + 0.4) * UNIT_Y); }   /* the spec line, above the lanes into line 1 */
+
+static int by_x(const void *a, const void *b) {
+    double x = *(const double *)a, y = *(const double *)b;
+    return (x > y) - (x < y);
+}
+
+/* Break the run into lines that fit the window at this zoom. A line ends
+ * only between columns of the outermost scope, so a branch, group or repeat
+ * is never split; one wider than the window has a line of its own. */
+static void relayout(MapWidget w) {
+    int count = w->map.node_count;
+    free(w->map.line_bottom);
+    free(w->map.line_top);
+    w->map.line_bottom = w->map.line_top = NULL;
+    w->map.line_count = 0;
+    w->map.content_w = w->map.content_h = 0;
+    if (!count) return;
+    double available = (w->map.width - left_pad(w) - MARGIN - BAR) / (UNIT_X * w->map.zoom);
+    double *columns = calloc((size_t)count, sizeof(double)), *starts = calloc((size_t)count, sizeof(double));
+    int column_count = 0, lines = 0;
+    for (int i = 0; i < count; i++) if (!*w->map.nodes[i].scope) columns[column_count++] = w->map.nodes[i].x;
+    qsort(columns, (size_t)column_count, sizeof(double), by_x);
+    for (int c = 0; c < column_count; c++) {
+        if (c && columns[c] == columns[c - 1]) continue;
+        double end = columns[c];
+        for (int i = 0; i < count; i++) {
+            const MapNode *n = &w->map.nodes[i];
+            if (!*n->scope && n->x == columns[c] && n->x + n->w > end) end = n->x + n->w;
+        }
+        if (!lines || end - starts[lines - 1] > available) starts[lines++] = columns[c];
+    }
+    /* Each step takes the line of its outermost enclosing step. */
+    for (int i = 0; i < count; i++) {
+        MapNode *n = &w->map.nodes[i];
+        char root[256];
+        snprintf(root, sizeof root, "%s", n->id);
+        char *slash = strchr(root, '/');
+        if (slash) *slash = 0;
+        int outer = find(w, root);
+        double x = outer >= 0 ? w->map.nodes[outer].x : n->x;
+        n->line = 0;
+        while (n->line + 1 < lines && starts[n->line + 1] <= x + 1e-9) n->line++;
+    }
+    /* Lines are as tall as what they hold. */
+    double *top = calloc((size_t)lines, sizeof(double)), *bottom = calloc((size_t)lines, sizeof(double));
+    for (int l = 0; l < lines; l++) { top[l] = 1e9; bottom[l] = -1e9; }
+    for (int i = 0; i < count; i++) {
+        const MapNode *n = &w->map.nodes[i];
+        top[n->line] = fmin(top[n->line], n->y);
+        bottom[n->line] = fmax(bottom[n->line], n->y + n->h);
+    }
+    w->map.line_bottom = calloc((size_t)lines, sizeof(double));
+    w->map.line_top = calloc((size_t)lines, sizeof(double));
+    double offset = 0, width = 0;
+    for (int l = 0; l < lines; l++) {
+        if (top[l] > bottom[l]) { top[l] = bottom[l] = 0; }
+        w->map.line_top[l] = offset;
+        w->map.line_bottom[l] = offset + bottom[l] - top[l];
+        for (int i = 0; i < count; i++) {
+            MapNode *n = &w->map.nodes[i];
+            if (n->line != l) continue;
+            n->lx = n->x - starts[l];
+            n->ly = n->y - top[l] + offset;
+            width = fmax(width, n->lx + n->w);
+        }
+        offset = w->map.line_bottom[l] + LINE_GAP;
+    }
+    w->map.line_count = lines;
+    w->map.content_w = left_pad(w) + width * UNIT_X * w->map.zoom + MARGIN;
+    w->map.content_h = top_pad(w) + (offset - LINE_GAP) * UNIT_Y * w->map.zoom + z(w, 0.8 * UNIT_Y) + MARGIN;
+    free(columns); free(starts); free(top); free(bottom);
+}
+
+/* Keep the scroll within the page; a page shorter than the window sits a
+ * little above the middle, where the eye rests. */
+static void place(MapWidget w) {
+    double spare_x = w->map.content_w - w->map.width, spare_y = w->map.content_h - w->map.height;
+    w->map.scroll_x = spare_x > 0 ? fmin(fmax(w->map.scroll_x, 0), spare_x) : 0;
+    w->map.scroll_y = spare_y > 0 ? fmin(fmax(w->map.scroll_y, 0), spare_y) : 0;
+    w->map.offset_x = left_pad(w) - w->map.scroll_x;
+    w->map.offset_y = top_pad(w) - w->map.scroll_y + (spare_y < 0 ? -spare_y / 3 : 0);
+}
+
+static void reflow(MapWidget w) {
+    relayout(w);
+    place(w);
+}
+
+/* A scrollbar's track, and its thumb's start and length, in pixels; 0 when
+ * the page fits that way. */
+static int scrollbar(MapWidget w, int axis, double *track, double *start, double *length) {
+    double view = axis == 'v' ? w->map.height : w->map.width;
+    double page = axis == 'v' ? w->map.content_h : w->map.content_w;
+    double scroll = axis == 'v' ? w->map.scroll_y : w->map.scroll_x;
+    if (page <= view + 0.5) return 0;
+    *track = view - 6 - BAR;
+    *length = fmax(*track * view / page, 24);
+    *start = (*track - *length) * scroll / (page - view);
+    return 1;
+}
+
 void MapSetGraph(Widget widget, const Json *graph) {
     MapWidget w = (MapWidget)widget;
     char *selected = w->map.selected >= 0 ? strdup(w->map.nodes[w->map.selected].id) : NULL;
@@ -485,7 +650,6 @@ void MapSetGraph(Widget widget, const Json *graph) {
     const Json *nodes = json_get(graph, "nodes"), *edges = json_get(graph, "edges");
     int count = nodes && nodes->type == JSON_ARRAY ? (int)nodes->count : 0;
     w->map.nodes = calloc((size_t)count + 1, sizeof(MapNode));
-    w->map.min_x = w->map.min_y = 1e9; w->map.max_x = w->map.max_y = -1e9;
     for (int i = 0; i < count; i++) {
         const Json *j = json_at(nodes, (size_t)i);
         MapNode *n = &w->map.nodes[w->map.node_count++];
@@ -502,10 +666,6 @@ void MapSetGraph(Widget widget, const Json *graph) {
         n->w = json_get_number(j, "w", 1); n->h = json_get_number(j, "h", 1);
         n->box = !strcmp(n->kind, "group") || !strcmp(n->kind, "repeat");
         n->for_each = json_get_bool(j, "for_each");
-        if (n->x < w->map.min_x) w->map.min_x = n->x;
-        if (n->y < w->map.min_y) w->map.min_y = n->y;
-        if (n->x + n->w > w->map.max_x) w->map.max_x = n->x + n->w;
-        if (n->y + n->h > w->map.max_y) w->map.max_y = n->y + n->h;
     }
     count = edges && edges->type == JSON_ARRAY ? (int)edges->count : 0;
     w->map.edges = calloc((size_t)count + 1, sizeof(MapEdge));
@@ -522,8 +682,16 @@ void MapSetGraph(Widget widget, const Json *graph) {
     }
     w->map.selected = find(w, selected);
     free(selected);
-    if (first) home(w);
-    else show(w);
+    if (first) w->map.scroll_x = w->map.scroll_y = 0;
+    reflow(w);
+    show(w);
+}
+
+void MapSetSpec(Widget widget, const char *spec) {
+    MapWidget w = (MapWidget)widget;
+    free(w->map.spec);
+    w->map.spec = spec ? strdup(spec) : NULL;
+    show(w);
 }
 
 void MapSetStates(Widget widget, const Json *states) {
@@ -579,11 +747,12 @@ void MapSelect(Widget widget, const char *path) {
     w->map.selected = find(w, path);
     if (w->map.selected >= 0) {   /* keep the selection in view */
         const MapNode *n = &w->map.nodes[w->map.selected];
-        double left = px(w, n->x), right = px(w, n->x + n->w), top = py(w, n->y), bottom = py(w, n->y + n->h);
-        if (left < MARGIN) w->map.offset_x += MARGIN - left;
-        else if (right > w->map.width - MARGIN) w->map.offset_x -= right - (w->map.width - MARGIN);
-        if (top < MARGIN) w->map.offset_y += MARGIN - top;
-        else if (bottom > w->map.height - MARGIN) w->map.offset_y -= bottom - (w->map.height - MARGIN);
+        double left = px(w, n->lx), right = px(w, n->lx + n->w), top = py(w, n->ly), bottom = py(w, n->ly + n->h) + z(w, 40);
+        if (left < MARGIN) w->map.scroll_x -= MARGIN - left;
+        else if (right > w->map.width - MARGIN) w->map.scroll_x += right - (w->map.width - MARGIN);
+        if (top < MARGIN) w->map.scroll_y -= MARGIN - top;
+        else if (bottom > w->map.height - MARGIN) w->map.scroll_y += bottom - (w->map.height - MARGIN);
+        place(w);
     }
     show(w);
 }
@@ -602,32 +771,34 @@ int MapSteps(Widget widget, const char **paths, int capacity) {
 
 double MapZoomLevel(Widget widget) { return ((MapWidget)widget)->map.zoom; }
 
-static void zoom_about(MapWidget w, double zoom, double x, double y) {
-    zoom = zoom < 0.25 ? 0.25 : zoom > 3.0 ? 3.0 : zoom;
-    double ux = (x - w->map.offset_x) / w->map.zoom, uy = (y - w->map.offset_y) / w->map.zoom;
+/* Zooming rewraps the lines, so the page keeps its relative scroll and the
+ * selection stays in view. */
+static void set_zoom(MapWidget w, double zoom) {
+    zoom = zoom < 0.4 ? 0.4 : zoom > 2.5 ? 2.5 : zoom;
+    double fraction = w->map.content_h > w->map.height ? w->map.scroll_y / (w->map.content_h - w->map.height) : 0;
     w->map.zoom = zoom;
-    w->map.offset_x = x - ux * zoom;
-    w->map.offset_y = y - uy * zoom;
     if (XtIsRealized((Widget)w)) load_fonts(w);
-    show(w);
+    reflow(w);
+    w->map.scroll_y = fraction * fmax(w->map.content_h - w->map.height, 0);
+    place(w);
+    if (w->map.selected >= 0) MapSelect((Widget)w, w->map.nodes[w->map.selected].id);
+    else show(w);
 }
 
-void MapSetZoom(Widget widget, double zoom) {
-    MapWidget w = (MapWidget)widget;
-    zoom_about(w, zoom, w->map.width / 2.0, w->map.height / 2.0);
-}
+void MapSetZoom(Widget widget, double zoom) { set_zoom((MapWidget)widget, zoom); }
 
 void MapZoom(Widget widget, double factor) {
     MapWidget w = (MapWidget)widget;
-    if (factor > 0) { zoom_about(w, w->map.zoom * factor, w->map.width / 2.0, w->map.height / 2.0); return; }
-    /* Fit: the run starts at the left margin; it may leave the page on the right. */
-    double span_x = fmax(w->map.max_x - w->map.min_x, 1), span_y = fmax(w->map.max_y - w->map.min_y, 1);
-    double zoom = fmin((w->map.width - 2 * MARGIN) / (span_x * UNIT_X), (w->map.height - 2 * MARGIN) / (span_y * UNIT_Y + 60));
-    w->map.zoom = zoom < 0.45 ? 0.45 : zoom > 1.25 ? 1.25 : zoom;
-    w->map.offset_x = MARGIN + 30 * w->map.zoom - w->map.min_x * UNIT_X * w->map.zoom;
-    w->map.offset_y = (w->map.height - span_y * UNIT_Y * w->map.zoom) / 2 - w->map.min_y * UNIT_Y * w->map.zoom;
-    if (XtIsRealized((Widget)w)) load_fonts(w);
-    show(w);
+    if (factor > 0) { set_zoom(w, w->map.zoom * factor); return; }
+    /* Fit: the largest zoom, up to full size, at which every line fits the window. */
+    double zoom = 1.25;
+    for (; zoom > 0.45; zoom -= 0.05) {
+        w->map.zoom = zoom;
+        relayout(w);
+        if (w->map.content_h <= w->map.height && w->map.content_w <= w->map.width) break;
+    }
+    w->map.scroll_x = w->map.scroll_y = 0;
+    set_zoom(w, zoom);
 }
 
 /* Navigation along the flow */
@@ -637,7 +808,8 @@ void MapStep(Widget widget, int direction) {
     int current = w->map.selected, best = -1;
     if (current < 0) {
         for (int i = 0; i < w->map.node_count; i++)
-            if (best < 0 || w->map.nodes[i].x < w->map.nodes[best].x) best = i;
+            if (best < 0 || w->map.nodes[i].ly < w->map.nodes[best].ly
+                || (w->map.nodes[i].ly == w->map.nodes[best].ly && w->map.nodes[i].lx < w->map.nodes[best].lx)) best = i;
     } else if (direction == 'n' || direction == 'p') {
         for (int i = 0; i < w->map.edge_count && best < 0; i++) {
             const MapEdge *e = &w->map.edges[i];
@@ -651,10 +823,10 @@ void MapStep(Widget widget, int direction) {
             best = find(w, w->map.nodes[current].scope);
     } else {
         const MapNode *c = &w->map.nodes[current];
-        double cy = c->y + c->h / 2, cx = c->x + c->w / 2, distance = 1e9;
+        double cy = c->ly + c->h / 2, cx = c->lx + c->w / 2, distance = 1e9;
         for (int i = 0; i < w->map.node_count; i++) {
             const MapNode *n = &w->map.nodes[i];
-            double ny = n->y + n->h / 2, nx = n->x + n->w / 2;
+            double ny = n->ly + n->h / 2, nx = n->lx + n->w / 2;
             if ((direction == 'u' && ny >= cy - 0.01) || (direction == 'd' && ny <= cy + 0.01)) continue;
             double d = fabs(ny - cy) + 2 * fabs(nx - cx);
             if (d < distance) { distance = d; best = i; }
@@ -671,14 +843,14 @@ static int hit(MapWidget w, int x, int y) {
     for (int i = w->map.node_count - 1; i >= 0; i--) {   /* steps over fields, inner over outer */
         const MapNode *n = &w->map.nodes[i];
         if (n->box) continue;
-        if (x >= px(w, n->x) && x <= px(w, n->x + n->w) && y >= py(w, n->y) && y <= py(w, n->y + n->h)) return i;
+        if (x >= px(w, n->lx) && x <= px(w, n->lx + n->w) && y >= py(w, n->ly) && y <= py(w, n->ly + n->h)) return i;
     }
     int found = -1;
     double area = 1e18;
     for (int i = 0; i < w->map.node_count; i++) {
         const MapNode *n = &w->map.nodes[i];
         if (!n->box) continue;
-        if (x >= px(w, n->x) && x <= px(w, n->x + n->w) && y >= py(w, n->y) && y <= py(w, n->y + n->h) && n->w * n->h < area) {
+        if (x >= px(w, n->lx) && x <= px(w, n->lx + n->w) && y >= py(w, n->ly) && y <= py(w, n->ly + n->h) && n->w * n->h < area) {
             found = i; area = n->w * n->h;
         }
     }
@@ -689,13 +861,32 @@ static void Press(Widget widget, XEvent *event, String *params, Cardinal *count)
     (void)params; (void)count;
     MapWidget w = (MapWidget)widget;
     XtSetKeyboardFocus(XtParent(widget), widget);
+    double track, start, length;
+    w->map.scrolling = 0;
+    if (scrollbar(w, 'v', &track, &start, &length) && event->xbutton.x >= w->map.width - BAR - 8) w->map.scrolling = 'v';
+    else if (scrollbar(w, 'h', &track, &start, &length) && event->xbutton.y >= w->map.height - BAR - 8) w->map.scrolling = 'h';
+    if (w->map.scrolling) {
+        /* A press off the thumb pages there; dragging moves the page. */
+        double at = w->map.scrolling == 'v' ? event->xbutton.y - 3 : event->xbutton.x - 3;
+        if (at < start || at > start + length) {
+            double page = w->map.scrolling == 'v' ? w->map.content_h - w->map.height : w->map.content_w - w->map.width;
+            double target = (at - length / 2) / (track - length) * page;
+            if (w->map.scrolling == 'v') w->map.scroll_y = target; else w->map.scroll_x = target;
+            place(w);
+            show(w);
+        }
+        w->map.pressed = 1;
+        w->map.press_x = event->xbutton.x; w->map.press_y = event->xbutton.y;
+        w->map.press_offset_x = w->map.scroll_x; w->map.press_offset_y = w->map.scroll_y;
+        return;
+    }
     int index = hit(w, event->xbutton.x, event->xbutton.y);
     int twice = index >= 0 && index == w->map.selected && event->xbutton.time - w->map.last_click < 350;
     w->map.last_click = event->xbutton.time;
     w->map.pressed = 1;
     w->map.dragging = w->map.connecting = 0;
     w->map.press_x = event->xbutton.x; w->map.press_y = event->xbutton.y;
-    w->map.press_offset_x = w->map.offset_x; w->map.press_offset_y = w->map.offset_y;
+    w->map.press_offset_x = w->map.scroll_x; w->map.press_offset_y = w->map.scroll_y;
     w->map.panning = index < 0;
     w->map.selected = index;
     show(w);
@@ -708,12 +899,26 @@ static void Motion(Widget widget, XEvent *event, String *params, Cardinal *count
     MapWidget w = (MapWidget)widget;
     if (!w->map.pressed) return;
     int dx = event->xmotion.x - w->map.press_x, dy = event->xmotion.y - w->map.press_y;
+    if (w->map.scrolling) {
+        double track, start, length;
+        int axis = w->map.scrolling;
+        if (scrollbar(w, axis, &track, &start, &length)) {
+            double page = axis == 'v' ? w->map.content_h - w->map.height : w->map.content_w - w->map.width;
+            double moved = (axis == 'v' ? dy : dx) / fmax(track - length, 1) * page;
+            if (axis == 'v') w->map.scroll_y = w->map.press_offset_y + moved;
+            else w->map.scroll_x = w->map.press_offset_x + moved;
+            place(w);
+            show(w);
+        }
+        return;
+    }
     if (!w->map.dragging && dx * dx + dy * dy < 36) return;
     w->map.dragging = 1;
     w->map.pointer_x = event->xmotion.x; w->map.pointer_y = event->xmotion.y;
     if (w->map.panning) {
-        w->map.offset_x = w->map.press_offset_x + dx;
-        w->map.offset_y = w->map.press_offset_y + dy;
+        w->map.scroll_x = w->map.press_offset_x - dx;
+        w->map.scroll_y = w->map.press_offset_y - dy;
+        place(w);
     } else {
         w->map.connecting = 1;   /* drag from a step to another to connect them */
     }
@@ -731,7 +936,7 @@ static void Release(Widget widget, XEvent *event, String *params, Cardinal *coun
             XtCallCallbackList(widget, w->map.connect_callback, (XtPointer)&connection);
         }
     }
-    w->map.pressed = w->map.dragging = w->map.connecting = w->map.panning = 0;
+    w->map.pressed = w->map.dragging = w->map.connecting = w->map.panning = w->map.scrolling = 0;
     show(w);
 }
 
@@ -739,9 +944,10 @@ static void Scroll(Widget widget, XEvent *event, String *params, Cardinal *count
     MapWidget w = (MapWidget)widget;
     if (*count < 1) return;
     int up = !strcmp(params[0], "up"), zoom = *count > 1 && !strcmp(params[1], "zoom");
-    if (zoom) { zoom_about(w, w->map.zoom * (up ? 1.12 : 1 / 1.12), event->xbutton.x, event->xbutton.y); return; }
-    if (event->xbutton.state & ShiftMask) w->map.offset_x += up ? 60 : -60;
-    else w->map.offset_y += up ? 60 : -60;
+    if (zoom) { set_zoom(w, w->map.zoom * (up ? 1.1 : 1 / 1.1)); return; }
+    if (event->xbutton.state & ShiftMask) w->map.scroll_x += up ? -60 : 60;
+    else w->map.scroll_y += up ? -60 : 60;
+    place(w);
     show(w);
 }
 
@@ -774,8 +980,6 @@ static void Initialize(Widget request, Widget created, ArgList args, Cardinal *c
     (void)request; (void)args; (void)count;
     MapWidget w = (MapWidget)created;
     w->map.zoom = 1.0;
-    w->map.offset_x = MARGIN;
-    w->map.offset_y = MARGIN;
     w->map.selected = -1;
     if (w->core.width == 0) w->core.width = 900;
     if (w->core.height == 0) w->core.height = 560;
@@ -809,13 +1013,14 @@ static void Realize(Widget widget, XtValueMask *mask, XSetWindowAttributes *attr
     XSetWindowBackgroundPixmap(d, XtWindow(w), None);
     load_fonts(w);
     make_buffer(w);
-    if (w->map.node_count) home(w);
+    reflow(w);
 }
 
 static void Resize(Widget widget) {
     MapWidget w = (MapWidget)widget;
     if (!XtIsRealized(widget)) return;
     make_buffer(w);
+    reflow(w);     /* a different width wraps the run differently */
     show(w);
 }
 
@@ -831,6 +1036,9 @@ static void Destroy(Widget widget) {
     MapWidget w = (MapWidget)widget;
     Display *d = XtDisplay(w);
     clear_graph(w);
+    free(w->map.line_bottom);
+    free(w->map.line_top);
+    free(w->map.spec);
     free_buffer(w);
     for (int i = 0; i < 8; i++) if (w->map.fills[i]) XRenderFreePicture(d, w->map.fills[i]);
     XftFont *fonts[] = { w->map.sans, w->map.sans_bold, w->map.mono, w->map.mono_bold, w->map.caps };

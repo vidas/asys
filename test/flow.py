@@ -247,6 +247,8 @@ class LayoutAndServiceTests(Fixture):
             {'id': 8, 'op': 'save'},
             {'id': 9, 'op': 'remove', 'step': 'handover'},
             {'id': 10, 'op': 'inspect', 'step': 'search/global_search'},
+            {'id': 11, 'op': 'set', 'step': '', 'key': 'description', 'value': 'Routes, reviewed.'},
+            {'id': 12, 'op': 'inspect', 'step': ''},
         ]
         output = io.StringIO()
         serve(io.StringIO(''.join(json.dumps(request) + '\n' for request in requests)), output)
@@ -271,6 +273,9 @@ class LayoutAndServiceTests(Fixture):
         # An inspector gets a step's own fields, in document order.
         self.assertEqual(list(responses[10]['data']), ['run', 'input', 'next'])
         self.assertEqual(responses[10]['data']['input'], {'request': 'Find a route.'})
+        # The empty path is the file itself, without its steps.
+        self.assertEqual(responses[12]['data'], {'asys': 'workflow/1', 'name': 'Delivery route review', 'start': 'brief',
+                                                 'description': 'Routes, reviewed.'})
 
 
 class RunViewTests(Fixture):

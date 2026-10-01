@@ -33,8 +33,10 @@ void MapSetStates(Widget map, const Json *states);
 /* PROBLEMS is the reply's list; each is shown beside the step it concerns. */
 void MapSetProblems(Widget map, const Json *problems);
 void MapSelect(Widget map, const char *path);
+/* The spec line at the head of the page: name, format, counts. */
+void MapSetSpec(Widget map, const char *spec);
 const char *MapSelection(Widget map);
-void MapZoom(Widget map, double factor);   /* 0 fits the whole workflow */
+void MapZoom(Widget map, double factor);   /* 0: the largest legible zoom at which every line fits */
 double MapZoomLevel(Widget map);
 void MapSetZoom(Widget map, double zoom);
 /* Move the selection along the flow: 'n'ext, 'p'revious, 'u'p, 'd'own. */

@@ -11,7 +11,9 @@ enum { STATE_NONE, STATE_WAITING, STATE_RUNNING, STATE_DONE, STATE_FAILED };
 
 typedef struct {
     char *id, *step, *scope, *kind, *label, *worker, *work, *call;
-    double x, y, w, h;          /* grid units */
+    double x, y, w, h;          /* grid units, as laid out in one line */
+    double lx, ly;              /* grid units once the run wraps into lines */
+    int line;
     int box;                    /* group or repeat: drawn as a field */
     int for_each;
     int state, visits;
@@ -43,8 +45,13 @@ typedef struct {
     int node_count;
     MapEdge *edges;
     int edge_count;
-    double min_x, min_y, max_x, max_y;
     double zoom, offset_x, offset_y;   /* pixel = unit * scale * zoom + offset */
+    double scroll_x, scroll_y;          /* how far the page is scrolled, in pixels */
+    double content_w, content_h;        /* the page, in pixels */
+    double *line_top, *line_bottom;     /* each line's edges, in units */
+    int line_count;
+    int scrolling;                      /* 'v' or 'h' while a scrollbar is dragged */
+    char *spec;                         /* the spec line opening the page */
     int selected;
     int states;                         /* a run is shown */
     /* pointer */

@@ -382,6 +382,18 @@ Old widgets, current interaction practice:
 - the map is drawn with XRender and text with Xft, so shapes and type are
   antialiased; type is Nimbus Sans (Helvetica metrics) set as the style guide
   specifies, and colours are its palette;
+- the map is the window: a run longer than the window wraps into lines, left
+  to right and top to bottom as the style guide sets type, breaking only
+  between columns so no branch or group is split; a rail that continues on
+  another line returns along the left margin and arrives through the gap
+  above its target's line; scrollbars appear only when the lines outgrow the
+  window, and a spec line (name, format, steps, file) opens the page;
+- a panel beside the map is never empty: the selected step (its ID, its fields,
+  its problems), or with nothing selected the workflow's own fields and every
+  problem, each leading to its step; in a run, the run's progress or the
+  step's jobs; Tab hides it;
+- the menu bar is the standard Athena one, MenuButtons and SimpleMenus listing
+  each command's key; messages and prompts share the line at the bottom;
 - keyboard first: every action has a key, and a command palette (`/`) finds
   any step or action by name, ranking whole-word matches first;
 - direct manipulation: select a step on the map, edit it in the inspector beside
@@ -389,7 +401,7 @@ Old widgets, current interaction practice:
   path); the YAML updates as you go;
 - unlimited undo and redo, and no modal dialogs: prompts use the line at the
   bottom, and errors from validation appear next to the step they concern and
-  in the list below the map;
+  in the panel;
 - open a run instead of a file to follow it live: each step shows its state by
   form, never by colour (open until it runs, filled once done, the verde cursor
   beneath it while it runs, and FAILED in words), and selecting it shows its
@@ -403,7 +415,8 @@ asys-flow-view --run RUN [--root DIR]           follow a run
 
 / palette   arrows move along the flow   Return edit the selected step
 a add after   r rename   c continue at   e on error   Delete remove
-u, Ctrl+Z undo   Ctrl+Y redo   Ctrl+S save   + - 0 zoom and fit   y YAML   q quit
+u, Ctrl+Z undo   Ctrl+Y redo   Ctrl+S save   + - zoom   0 fit   1 full size
+Tab panel   y YAML   q quit
 ```
 
 A double click on a `call` step opens the file it calls. `ASYS_FLOW_SERVICE`

@@ -7,13 +7,13 @@ graph, the validation problems and the text, so a viewer never re-derives them.
 
 Requests (`id` is echoed back):
   {"op": "load", "file": PATH, "environment": DIR?}
-  {"op": "set", "step": PATH, "key": "input.request", "value": JSON}   null deletes
+  {"op": "set", "step": PATH, "key": "input.request", "value": JSON}   null deletes; "" is the file
   {"op": "add", "scope": PATH, "name": NAME, "step": JSON}
   {"op": "remove", "step": PATH}
   {"op": "rename", "step": PATH, "to": NAME}
   {"op": "connect", "step": PATH, "key": "next"|"on_error"|..., "to": NAME}
   {"op": "undo"} {"op": "redo"} {"op": "save"} {"op": "check"}
-  {"op": "inspect", "step": PATH}          the step's own fields, without the graph
+  {"op": "inspect", "step": PATH}          the step's own fields; "" the file's, without steps
 
 Following a run (read-only; the graph is the run's saved document):
   {"op": "open", "run": DIRECTORY|ID, "root": STATE?}   graph, run status, step states
@@ -54,7 +54,7 @@ class Session:
         self.past, self.future = [], []
 
     def set(self, step, key, value):
-        target = self._step(step)
+        target = self._step(step) if step else self.workflow.data   # an empty path is the file itself
         keys = key.split('.')
         container = target
         for part in keys[:-1]:
@@ -266,7 +266,9 @@ def handle(session, request):
         getattr(session, op)()
     elif op == 'inspect':
         # A step's own fields, as plain JSON in document order, for an inspector.
-        return {'step': request['step'], 'data': json.loads(json.dumps(session._step(request['step']), default=str))}
+        step = request['step']
+        data = session._step(step) if step else {key: value for key, value in session.workflow.data.items() if key != 'steps'}
+        return {'step': step, 'data': json.loads(json.dumps(data, default=str))}
     elif op != 'check':
         raise EditError(f'unknown request {op!r}')
     return session.state()

@@ -52,10 +52,16 @@ typedef struct {
 
 static struct {
     XtAppContext app;
-    Widget top, paned, bar, title, status, split, map, side, heading, fields_view, fields, details, yaml;
-    Widget problems_view, problems, mini, prompt, entry, palette, matches;
+    Widget top, paned, bar, split, map, side, heading, subheading, fields_view, fields, details;
+    Widget issues_title, issues_view, issues, yaml, mini, prompt, entry, palette, matches;
     char *file, *environment, *run, *root;
-    int run_mode, dirty, can_undo, can_redo, quit_armed, yaml_shown;
+    int run_mode, dirty, can_undo, can_redo, quit_armed, yaml_shown, panel_hidden;
+    Json *problems;                   /* the latest validation, for the panel */
+    char message[512];                /* the latest message, on the bottom line */
+    char *name;                       /* the workflow's name */
+    char run_summary[1024];           /* the run as a whole, for the panel */
+    int step_count;
+    XFontStruct *mono_heading, *sans_heading;
     char *selected;
     Row rows[MAX_ROWS];
     int row_count;
@@ -65,7 +71,7 @@ static struct {
     int item_count, shown;           /* shown: the first matches, which the list displays */
     String problem_lines[MAX_ITEMS + 1];
     char *problem_steps[MAX_ITEMS];
-    int problem_count;
+    int problem_count, listed;        /* listed: the lines the issues List holds */
     char settings[1024];
 } v;
 
@@ -80,13 +86,14 @@ static char *format(const char *fmt, ...) {
     return text;
 }
 
+/* Messages go on the bottom line, where prompts also appear. */
 static void status(const char *fmt, ...) {
-    char text[512];
     va_list args;
     va_start(args, fmt);
-    vsnprintf(text, sizeof text, fmt, args);
+    vsnprintf(v.message, sizeof v.message, fmt, args);
     va_end(args);
-    XtVaSetValues(v.status, XtNlabel, text, NULL);
+    if (v.prompt && v.mini_mode == MINI_NONE)
+        XtVaSetValues(v.prompt, XtNlabel, *v.message ? v.message : "/ finds steps and commands", NULL);
 }
 
 static const char *base_name(const char *path) {
@@ -122,37 +129,95 @@ static int failed(const Json *reply) {
 
 static void inspect(void);
 
+/* The file names the window; the spec line heads the page. */
 static void show_title(void) {
-    char text[512];
-    const char *name = v.run_mode ? v.run : v.file ? base_name(v.file) : "no file";
-    snprintf(text, sizeof text, "%s%s", name, v.dirty ? "   (unsaved)" : "");
-    XtVaSetValues(v.title, XtNlabel, text, NULL);
+    const char *file = v.run_mode ? v.run : v.file ? base_name(v.file) : "no file";
     char window[600];
-    snprintf(window, sizeof window, "asys - %s%s", name, v.dirty ? " *" : "");
+    snprintf(window, sizeof window, "%s%s - asys", file, v.dirty ? " (unsaved)" : "");
     XtVaSetValues(v.top, XtNtitle, window, NULL);
+    char spec[600];
+    snprintf(spec, sizeof spec, "%s  ·  workflow/1  ·  %d steps  ·  %s%s", v.name ? v.name : "untitled",
+             v.step_count, v.run_mode ? "run" : file, v.dirty ? "  ·  unsaved" : "");
+    MapSetSpec(v.map, spec);
+}
+
+static void count_graph(const Json *graph) {
+    free(v.name);
+    const char *name = json_get_string(graph, "name");
+    v.name = name && *name ? strdup(name) : NULL;
+    v.step_count = 0;
+    const Json *nodes = json_get(graph, "nodes");
+    for (size_t i = 0; nodes && i < nodes->count; i++) {
+        const char *kind = json_get_string(json_at(nodes, i), "kind");
+        if (kind && strcmp(kind, "group") && strcmp(kind, "repeat")) v.step_count++;
+    }
+}
+
+/* The step a problem concerns: steps.search.group.steps.local.input is
+ * search/local. Problems outside steps concern the file. */
+static char *problem_step(const Json *problem) {
+    const char *at = json_get_string(problem, "at");
+    if (!at || strncmp(at, "steps.", 6)) return NULL;
+    char path[256] = "", rest[256];
+    snprintf(rest, sizeof rest, "%s", at + 6);
+    char *save = NULL, *part = strtok_r(rest, ".", &save);
+    int expect = 1;
+    while (part) {
+        if (expect) {
+            if (*path) strncat(path, "/", sizeof path - strlen(path) - 1);
+            strncat(path, part, sizeof path - strlen(path) - 1);
+            expect = 0;
+        } else if (!strcmp(part, "group")) {
+            part = strtok_r(NULL, ".", &save);
+            expect = part && !strcmp(part, "steps");
+        } else if (!strcmp(part, "repeat")) {
+            expect = 1;
+        } else {
+            break;
+        }
+        part = strtok_r(NULL, ".", &save);
+    }
+    return strdup(path);
+}
+
+/* The panel lists the problems of what it shows: the selected step and the
+ * steps inside it, or, with nothing selected, all of them. */
+static void show_issues(void) {
+    const char *selected = MapSelection(v.map);
+    /* The List shows these lines until the next change: they live until then. */
+    for (int i = 0; i < v.listed; i++) { free(v.problem_lines[i]); free(v.problem_steps[i]); v.problem_steps[i] = NULL; }
+    v.problem_count = 0;
+    for (size_t i = 0; v.problems && i < v.problems->count && v.problem_count < MAX_ITEMS; i++) {
+        const Json *p = json_at(v.problems, i);
+        char *step = problem_step(p);
+        size_t length = selected ? strlen(selected) : 0;
+        if (selected && !(step && !strncmp(step, selected, length) && (!step[length] || step[length] == '/'))) {
+            free(step);
+            continue;
+        }
+        const char *message = json_get_string(p, "message");
+        v.problem_lines[v.problem_count] = selected || !step ? strdup(message ? message : "")
+                                                             : format("%s: %s", step, message ? message : "");
+        v.problem_steps[v.problem_count++] = step;
+    }
+    char title[64];
+    if (v.problem_count) snprintf(title, sizeof title, "Problems (%d)", v.problem_count);
+    else snprintf(title, sizeof title, "%s", v.run_mode ? "" : selected ? "No problems in this step" : "No problems");
+    XtVaSetValues(v.issues_title, XtNlabel, title, NULL);
+    v.listed = v.problem_count;
+    if (!v.listed) { v.problem_lines[0] = strdup(""); v.problem_steps[0] = NULL; v.listed = 1; }
+    v.problem_lines[v.listed] = NULL;
+    XawListChange(v.issues, (const char **)v.problem_lines, v.listed, 0, True);
 }
 
 static void show_problems(const Json *problems) {
-    for (int i = 0; i < v.problem_count; i++) { free(v.problem_lines[i]); free(v.problem_steps[i]); }
-    v.problem_count = 0;
-    for (size_t i = 0; problems && i < problems->count && v.problem_count < MAX_ITEMS; i++) {
-        const Json *p = json_at(problems, i);
-        const char *file = json_get_string(p, "file"), *at = json_get_string(p, "at"), *message = json_get_string(p, "message");
-        v.problem_lines[v.problem_count] = format("%s  %s  %s", file ? base_name(file) : "", at ? at : "", message ? message : "");
-        v.problem_steps[v.problem_count] = NULL;
-        if (at && !strncmp(at, "steps.", 6)) {   /* the step a problem names, for selecting it */
-            char path[256];
-            snprintf(path, sizeof path, "%s", at + 6);
-            char *dot = strchr(path, '.');
-            if (dot) *dot = 0;
-            v.problem_steps[v.problem_count] = strdup(path);
-        }
-        v.problem_count++;
-    }
-    if (!v.problem_count) v.problem_lines[v.problem_count++] = strdup("No problems.");
-    v.problem_lines[v.problem_count] = NULL;
-    XawListChange(v.problems, (const char **)v.problem_lines, v.problem_count, 0, True);
+    json_free(v.problems);
+    char *copy = json_write(problems);
+    const char *error;
+    v.problems = json_parse(copy, &error);
+    free(copy);
     MapSetProblems(v.map, problems);
+    show_issues();
 }
 
 static void apply_state(const Json *reply, void *data) {
@@ -160,6 +225,7 @@ static void apply_state(const Json *reply, void *data) {
     if (failed(reply)) return;
     const Json *graph = json_get(reply, "graph");
     if (graph) {
+        count_graph(graph);
         MapSetGraph(v.map, graph);
         if (v.selected) MapSelect(v.map, v.selected);   /* the selection survives edits, and follows a rename */
     }
@@ -306,14 +372,26 @@ static void step_details(const Json *reply, void *data) {
     free(text);
 }
 
+/* The panel shows the selected step, or with nothing selected the workflow
+ * itself: never an empty pane. */
 static void inspect(void) {
     const char *selected = MapSelection(v.map);
-    char heading[300];
-    snprintf(heading, sizeof heading, "%s", selected ? selected : v.run_mode ? "Select a step" : "Select a step to edit it");
-    XtVaSetValues(v.heading, XtNlabel, heading, NULL);
-    if (!selected) { clear_rows(); if (v.fields) show_rows(); show_details(""); return; }
+    char heading[300], under[300];
+    if (selected) {
+        snprintf(heading, sizeof heading, "%s", selected);
+        XtVaSetValues(v.heading, XtNlabel, heading, XtNfont, v.mono_heading, NULL);
+    } else {
+        snprintf(heading, sizeof heading, "%s", v.name ? v.name : v.run_mode ? "Run" : "Workflow");
+        XtVaSetValues(v.heading, XtNlabel, heading, XtNfont, v.sans_heading, NULL);
+    }
+    if (selected) snprintf(under, sizeof under, "%s", v.run_mode ? "Step of this run" : "Step  \xb7  Return edits a field, Tab moves on");
+    else if (v.run_mode) snprintf(under, sizeof under, "Select a step for its jobs, results and logs");
+    else snprintf(under, sizeof under, "%s  \xb7  select a step to edit it", v.file ? base_name(v.file) : "");
+    XtVaSetValues(v.subheading, XtNlabel, under, NULL);
+    show_issues();
+    if (v.run_mode && !selected) { show_details(v.run_summary); return; }
     Json *r = request(v.run_mode ? "step" : "inspect");
-    json_set(r, "step", json_string(selected));
+    json_set(r, "step", json_string(selected ? selected : ""));
     service_send(r, v.run_mode ? step_details : inspected, NULL);
 }
 
@@ -327,7 +405,8 @@ static Json *typed(const char *text, const Json *before) {
 
 static void commit(Widget text) {
     const char *selected = MapSelection(v.map);
-    if (!selected || v.run_mode) return;
+    if (v.run_mode) return;
+    if (!selected) selected = "";            /* the file's own fields */
     for (int i = 0; i < v.row_count; i++) {
         if (v.rows[i].text != text) continue;
         String value;
@@ -357,14 +436,15 @@ static void commit(Widget text) {
 
 static const char *COMMANDS[] = {
     "save", "undo", "redo", "add step after", "rename step", "remove step", "connect next",
-    "connect on_error", "open called workflow", "fit", "zoom in", "zoom out", "toggle yaml", "quit", NULL,
+    "connect on_error", "open called workflow", "fit", "zoom in", "zoom out", "toggle yaml", "toggle panel", "quit", NULL,
 };
 
 static void mini_close(void) {
     v.mini_mode = MINI_NONE;
     XtPopdown(v.palette);
-    XtVaSetValues(v.prompt, XtNlabel, "/ commands and steps", NULL);
     XtVaSetValues(v.entry, XtNstring, "", NULL);
+    XtUnmanageChild(v.entry);
+    status("%s", v.message);
     focus(NULL);
 }
 
@@ -447,6 +527,7 @@ static void palette_fill(const char *query) {
 static void mini_open(MiniMode mode, const char *prompt, const char *initial) {
     v.mini_mode = mode;
     XtVaSetValues(v.prompt, XtNlabel, prompt, NULL);
+    XtManageChild(v.entry);            /* the field appears only while a prompt waits */
     XtVaSetValues(v.entry, XtNstring, initial ? initial : "", NULL);
     XawTextSetInsertionPoint(v.entry, initial ? (XawTextPosition)strlen(initial) : 0);
     if (mode == MINI_PALETTE || mode == MINI_CONNECT || mode == MINI_ON_ERROR) {
@@ -550,8 +631,15 @@ static void reload_reply(const Json *reply, void *data) { apply_state(reply, dat
 static void command(const char *name) {
     const char *selected = MapSelection(v.map);
     if (!strcmp(name, "fit")) { MapZoom(v.map, 0); return; }
+    if (!strcmp(name, "full size")) { MapSetZoom(v.map, 1.0); return; }
+    if (!strcmp(name, "go to")) { mini_open(MINI_PALETTE, "Go to:", ""); return; }
     if (!strcmp(name, "zoom in")) { MapZoom(v.map, 1.2); return; }
     if (!strcmp(name, "zoom out")) { MapZoom(v.map, 1 / 1.2); return; }
+    if (!strcmp(name, "toggle panel")) {
+        v.panel_hidden = !v.panel_hidden;
+        if (v.panel_hidden) XtUnmanageChild(v.side); else XtManageChild(v.side);
+        return;
+    }
     if (!strcmp(name, "toggle yaml")) {
         v.yaml_shown = !v.yaml_shown;
         if (v.yaml_shown) XtManageChild(v.yaml); else XtUnmanageChild(v.yaml);
@@ -639,10 +727,11 @@ static void map_connected(Widget w, XtPointer client, XtPointer call) {
     send_edit(r, !strcmp(c->key, "next") ? "Connected." : "Error path set.");
 }
 
-static void problem_chosen(Widget w, XtPointer client, XtPointer call) {
+static void issue_chosen(Widget w, XtPointer client, XtPointer call) {
     (void)w; (void)client;
     XawListReturnStruct *chosen = call;
-    if (chosen->list_index >= 0 && chosen->list_index < v.problem_count && v.problem_steps[chosen->list_index])
+    if (chosen->list_index >= 0 && chosen->list_index < v.problem_count && v.problem_steps[chosen->list_index]
+        && !MapSelection(v.map))
         select_step(v.problem_steps[chosen->list_index]);
 }
 
@@ -664,16 +753,29 @@ static void poll_reply(const Json *reply, void *data) {
     (void)data;
     if (!json_get_bool(reply, "ok")) { failed(reply); return; }
     const Json *graph = json_get(reply, "graph");
-    if (graph) MapSetGraph(v.map, graph);
+    if (graph) { count_graph(graph); MapSetGraph(v.map, graph); }
     MapSetStates(v.map, json_get(reply, "states"));
     const Json *run = json_get(reply, "run");
     const char *state = json_get_string(run, "status"), *error = json_get_string(run, "error");
-    char text[512];
-    snprintf(text, sizeof text, "%s%s%s", state ? state : "", error && *error ? ": " : "", error ? error : "");
-    XtVaSetValues(v.status, XtNlabel, text, NULL);
+    status("This run is %s%s%s", state ? state : "unknown", error && *error ? ": " : "", error ? error : "");
+    /* The run as a whole: how far it has come. */
+    int done = 0, running = 0, failed_steps = 0;
+    const Json *states = json_get(reply, "states");
+    for (size_t i = 0; states && i < states->count; i++) {
+        const char *s = json_get_string(states->items[i], "state");
+        if (!s) continue;
+        done += !strcmp(s, "done");
+        running += !strcmp(s, "running");
+        failed_steps += !strcmp(s, "failed");
+    }
+    int waiting = v.step_count - done - running - failed_steps;
+    snprintf(v.run_summary, sizeof v.run_summary,
+             "This run is %s.%s%s\n\n%d done\n%d running\n%d failed\n%d not reached",
+             state ? state : "unknown", error && *error ? "\n" : "", error ? error : "", done, running, failed_steps, waiting < 0 ? 0 : waiting);
     const char *name = json_get_string(run, "name");
-    if (name) { free(v.run); v.run = strdup(name); show_title(); }
-    if (MapSelection(v.map)) inspect();
+    if (name && !v.name) v.name = strdup(name);
+    show_title();
+    inspect();   /* the step, or the run as a whole */
 }
 
 static void poll(XtPointer client, XtIntervalId *id) {
@@ -743,44 +845,51 @@ static XtActionsRec actions[] = {
     { "focus-inspector", FocusInspector }, { "field-next", FieldNext },
 };
 
+/* Flat surfaces in the style guide's palette: paper, campo for the panel and
+ * fields, 1-px rules at ink 45 %, Helvetica throughout and Courier for
+ * identifiers. The menu bar is the standard one: MenuButtons in a Box. */
 static String fallback[] = {
     "AsysFlowView*background: #EFE7D6",
     "AsysFlowView*foreground: #201A12",
+    "AsysFlowView*borderColor: #9B9384",
     "AsysFlowView*borderWidth: 0",
     "AsysFlowView*font: -adobe-helvetica-medium-r-normal--12-*-*-*-p-*-iso8859-1",
     "AsysFlowView*Text*font: -adobe-courier-medium-r-normal--12-*-*-*-m-*-iso8859-1",
-    "AsysFlowView*Text*background: #EFE7D6",
-    "AsysFlowView*Text*borderWidth: 0",
     "AsysFlowView*Paned.internalBorderWidth: 1",
     "AsysFlowView*Paned.internalBorderColor: #9B9384",
     "AsysFlowView*showGrip: False",
-    "AsysFlowView*bar.background: #201A12",
-    "AsysFlowView*bar*background: #201A12",
-    "AsysFlowView*bar*foreground: #EFE7D6",
-    "AsysFlowView*bar.hSpace: 14",
-    "AsysFlowView*bar.vSpace: 6",
-    "AsysFlowView*bar*font: -adobe-helvetica-bold-r-normal--12-*-*-*-p-*-iso8859-1",
-    "AsysFlowView*bar.title.font: -adobe-helvetica-medium-r-normal--12-*-*-*-p-*-iso8859-1",
-    "AsysFlowView*SimpleMenu*background: #EFE7D6",
-    "AsysFlowView*SimpleMenu*foreground: #201A12",
+    "AsysFlowView*bar.hSpace: 2",
+    "AsysFlowView*bar.vSpace: 2",
+    "AsysFlowView*bar.MenuButton.internalWidth: 10",
+    "AsysFlowView*bar.MenuButton.internalHeight: 3",
     "AsysFlowView*SimpleMenu.borderWidth: 1",
-    "AsysFlowView*SimpleMenu*leftMargin: 14",
-    "AsysFlowView*SimpleMenu*rightMargin: 14",
-    "AsysFlowView*SimpleMenu*font: -adobe-helvetica-medium-r-normal--12-*-*-*-p-*-iso8859-1",
+    "AsysFlowView*SimpleMenu.borderColor: #201A12",
+    "AsysFlowView*SimpleMenu*leftMargin: 16",
+    "AsysFlowView*SimpleMenu*rightMargin: 16",
+    "AsysFlowView*SimpleMenu*vertSpace: 40",
+    "AsysFlowView*SimpleMenu*line.foreground: #9B9384",
     "AsysFlowView*side*background: #E1D9C8",
-    "AsysFlowView*side*Text*background: #E1D9C8",
-    "AsysFlowView*side.heading.font: -adobe-helvetica-bold-r-normal--14-*-*-*-p-*-iso8859-1",
-    "AsysFlowView*side.heading.internalHeight: 10",
-    "AsysFlowView*fields*key.foreground: #6E675B",
+    "AsysFlowView*side.heading.internalWidth: 14",
+    "AsysFlowView*side.heading.internalHeight: 8",
+    "AsysFlowView*side.subheading.foreground: #6E675B",
+    "AsysFlowView*side.subheading.internalWidth: 14",
+    "AsysFlowView*side.issuesTitle.font: -adobe-helvetica-bold-r-normal--12-*-*-*-p-*-iso8859-1",
+    "AsysFlowView*side.issuesTitle.internalWidth: 14",
     "AsysFlowView*fields.defaultDistance: 6",
-    "AsysFlowView*problems*font: -adobe-helvetica-medium-r-normal--12-*-*-*-p-*-iso8859-1",
-    "AsysFlowView*problems.background: #EFE7D6",
-    "AsysFlowView*mini.background: #E1D9C8",
+    "AsysFlowView*fields*key.foreground: #6E675B",
+    "AsysFlowView*fields*value.background: #EFE7D6",
+    "AsysFlowView*fields*value.borderWidth: 1",
+    "AsysFlowView*fields*value.borderColor: #E1D9C8",
+    "AsysFlowView*issues.background: #E1D9C8",
+    "AsysFlowView*issues.internalWidth: 14",
+    "AsysFlowView*yaml.background: #EFE7D6",
+    "AsysFlowView*details.background: #E1D9C8",
     "AsysFlowView*mini*background: #E1D9C8",
-    "AsysFlowView*prompt.font: -adobe-helvetica-bold-r-normal--12-*-*-*-p-*-iso8859-1",
-    "AsysFlowView*matches.defaultColumns: 1",
-    "AsysFlowView*matches.forceColumns: True",
-    "AsysFlowView*List.highlightColor: #3E7C5A",
+    "AsysFlowView*prompt.internalWidth: 10",
+    "AsysFlowView*entry.background: #E1D9C8",
+    "AsysFlowView*palette.borderColor: #201A12",
+    "AsysFlowView*matches.background: #EFE7D6",
+    "AsysFlowView*matches.internalWidth: 10",
     NULL,
 };
 
@@ -803,6 +912,8 @@ static char map_keys[] =
     "<Key>0: command(fit)\n"
     "<Key>y: command(\"toggle yaml\")\n"
     "<Key>q: command(quit)\n"
+    "<Key>Tab: command(\"toggle panel\")\n"
+    "<Key>1: command(\"full size\")\n"
     "<Key>Return: focus-inspector()\n";
 
 static char entry_keys[] =
@@ -861,23 +972,24 @@ int main(int argc, char **argv) {
     v.paned = XtVaCreateManagedWidget("paned", panedWidgetClass, v.top, XtNorientation, XtorientVertical, NULL);
     v.bar = XtVaCreateManagedWidget("bar", boxWidgetClass, v.paned, XtNorientation, XtorientHorizontal,
                                     XtNshowGrip, False, XtNskipAdjust, True, NULL);
-    XtVaCreateManagedWidget("wordmark", labelWidgetClass, v.bar, XtNlabel, "asys", NULL);
-    static const char *const file_entries[][2] = { { "Save            Ctrl+S", "save" }, { "", "" },
-                                                   { "Quit                  q", "quit" }, { NULL, NULL } };
+    static const char *const file_entries[][2] = { { "Save                Ctrl+S", "save" }, { "", "" },
+                                                   { "Quit                     q", "quit" }, { NULL, NULL } };
     static const char *const edit_entries[][2] = { { "Undo        Ctrl+Z", "undo" }, { "Redo        Ctrl+Y", "redo" }, { "", "" },
                                                    { "Add step after       a", "add step after" },
                                                    { "Rename step          r", "rename step" },
                                                    { "Continue at...       c", "connect next" },
                                                    { "On error...          e", "connect on_error" },
                                                    { "Remove step        Del", "remove step" }, { NULL, NULL } };
-    static const char *const view_entries[][2] = { { "Fit                  0", "fit" }, { "Zoom in              +", "zoom in" },
-                                                   { "Zoom out             -", "zoom out" }, { "", "" },
-                                                   { "YAML                 y", "toggle yaml" }, { NULL, NULL } };
+    static const char *const view_entries[][2] = { { "Fit to window          0", "fit" },
+                                                   { "Full size              1", "full size" },
+                                                   { "Zoom in                +", "zoom in" },
+                                                   { "Zoom out               -", "zoom out" }, { "", "" },
+                                                   { "Go to...               /", "go to" },
+                                                   { "Panel                Tab", "toggle panel" },
+                                                   { "YAML                   y", "toggle yaml" }, { NULL, NULL } };
     menu(v.bar, "file", "File", file_entries);
     if (!v.run_mode) menu(v.bar, "edit", "Edit", edit_entries);
     menu(v.bar, "view", "View", view_entries);
-    v.title = XtVaCreateManagedWidget("title", labelWidgetClass, v.bar, XtNlabel, "", XtNwidth, 360, XtNjustify, XtJustifyLeft, NULL);
-    v.status = XtVaCreateManagedWidget("status", labelWidgetClass, v.bar, XtNlabel, "", XtNwidth, 520, XtNjustify, XtJustifyLeft, NULL);
 
     v.split = XtVaCreateManagedWidget("split", panedWidgetClass, v.paned, XtNorientation, XtorientHorizontal,
                                       XtNshowGrip, False, NULL);
@@ -887,38 +999,49 @@ int main(int argc, char **argv) {
     XtAddCallback(v.map, XtNactivateCallback, map_activated, NULL);
     XtAddCallback(v.map, XtNconnectCallback, map_connected, NULL);
 
-    v.side = XtVaCreateManagedWidget("side", panedWidgetClass, v.split, XtNorientation, XtorientVertical, XtNwidth, 380,
-                                     XtNmin, 240, NULL);
+    v.side = XtVaCreateManagedWidget("side", panedWidgetClass, v.split, XtNorientation, XtorientVertical, XtNwidth, 320,
+                                     XtNmin, 240, XtNinternalBorderWidth, 0, NULL);
+    Display *display = XtDisplay(v.top);
+    v.mono_heading = XLoadQueryFont(display, "-adobe-courier-bold-r-normal--18-*-*-*-m-*-iso8859-1");
+    v.sans_heading = XLoadQueryFont(display, "-adobe-helvetica-bold-r-normal--18-*-*-*-p-*-iso8859-1");
+    if (!v.mono_heading) v.mono_heading = XLoadQueryFont(display, "fixed");
+    if (!v.sans_heading) v.sans_heading = XLoadQueryFont(display, "fixed");
     v.heading = XtVaCreateManagedWidget("heading", labelWidgetClass, v.side, XtNlabel, "", XtNjustify, XtJustifyLeft,
-                                        XtNshowGrip, False, XtNskipAdjust, True, NULL);
+                                        XtNfont, v.sans_heading, XtNshowGrip, False, XtNskipAdjust, True, NULL);
+    v.subheading = XtVaCreateManagedWidget("subheading", labelWidgetClass, v.side, XtNlabel, "", XtNjustify, XtJustifyLeft,
+                                           XtNshowGrip, False, XtNskipAdjust, True, NULL);
     if (v.run_mode) {
         v.details = XtVaCreateManagedWidget("details", asciiTextWidgetClass, v.side, XtNscrollVertical, XawtextScrollWhenNeeded,
                                             XtNwrap, XawtextWrapLine, XtNeditType, XawtextRead, XtNstring, "",
-                                            XtNdisplayCaret, False, NULL);
+                                            XtNdisplayCaret, False, XtNpreferredPaneSize, 600, XtNmin, 160, XtNleftMargin, 14, XtNtopMargin, 6, NULL);
     } else {
-        v.fields_view = XtVaCreateManagedWidget("fieldsView", viewportWidgetClass, v.side, XtNallowVert, True, XtNheight, 480,
+        v.fields_view = XtVaCreateManagedWidget("fieldsView", viewportWidgetClass, v.side, XtNallowVert, True, XtNheight, 300,
+                                                XtNpreferredPaneSize, 320, XtNmin, 120,
                                                 XtNforceBars, False, XtNuseRight, True, NULL);
-        v.fields = XtVaCreateManagedWidget("fields", formWidgetClass, v.fields_view, XtNwidth, 390, XtNheight, 40, NULL);
+        v.fields = XtVaCreateManagedWidget("fields", formWidgetClass, v.fields_view, XtNwidth, 300, XtNheight, 40, NULL);
         v.details = XtVaCreateWidget("details", asciiTextWidgetClass, v.side, XtNeditType, XawtextRead, NULL);
     }
+    v.issues_title = XtVaCreateManagedWidget("issuesTitle", labelWidgetClass, v.side, XtNlabel, "", XtNjustify, XtJustifyLeft,
+                                             XtNshowGrip, False, XtNskipAdjust, True, NULL);
+    v.issues_view = XtVaCreateManagedWidget("issuesView", viewportWidgetClass, v.side, XtNallowVert, True, XtNheight, 140,
+                                            XtNpreferredPaneSize, 140, XtNmin, 40,
+                                            XtNshowGrip, False, NULL);
+    v.problem_lines[0] = strdup("");
+    v.problem_lines[1] = NULL;
+    v.listed = 1;
+    v.issues = XtVaCreateManagedWidget("issues", listWidgetClass, v.issues_view, XtNlist, v.problem_lines,
+                                       XtNdefaultColumns, 1, XtNforceColumns, True, XtNverticalList, True, NULL);
+    XtAddCallback(v.issues, XtNcallback, issue_chosen, NULL);
+    if (v.run_mode) { XtUnmanageChild(v.issues_title); XtUnmanageChild(v.issues_view); }   /* a run is not edited */
     v.yaml = XtVaCreateWidget("yaml", asciiTextWidgetClass, v.side, XtNscrollVertical, XawtextScrollWhenNeeded,
                               XtNpreferredPaneSize, 360, XtNmin, 120,
                               XtNeditType, XawtextRead, XtNstring, "", XtNdisplayCaret, False, NULL);
 
-    v.problems_view = XtVaCreateManagedWidget("problemsView", viewportWidgetClass, v.paned, XtNallowVert, True,
-                                              XtNheight, 64, XtNmin, 24, XtNmax, 160, XtNpreferredPaneSize, 64,
-                                              XtNskipAdjust, True, XtNshowGrip, False, NULL);
-    v.problem_lines[0] = "";
-    v.problem_lines[1] = NULL;
-    v.problems = XtVaCreateManagedWidget("problems", listWidgetClass, v.problems_view, XtNlist, v.problem_lines,
-                                         XtNdefaultColumns, 1, XtNforceColumns, True, XtNverticalList, True, NULL);
-    XtAddCallback(v.problems, XtNcallback, problem_chosen, NULL);
-    if (v.run_mode) XtUnmanageChild(v.problems_view);   /* a run is not edited: nothing to check */
 
     v.mini = XtVaCreateManagedWidget("mini", formWidgetClass, v.paned, XtNshowGrip, False, XtNskipAdjust, True, NULL);
-    v.prompt = XtVaCreateManagedWidget("prompt", labelWidgetClass, v.mini, XtNlabel, "/ commands and steps",
-                                       XtNwidth, 220, XtNjustify, XtJustifyLeft, XtNleft, XtChainLeft, XtNright, XtChainLeft, NULL);
-    v.entry = XtVaCreateManagedWidget("entry", asciiTextWidgetClass, v.mini, XtNeditType, XawtextEdit, XtNfromHoriz, v.prompt,
+    v.prompt = XtVaCreateManagedWidget("prompt", labelWidgetClass, v.mini, XtNlabel, "/ finds steps and commands",
+                                       XtNjustify, XtJustifyLeft, XtNresizable, True, XtNleft, XtChainLeft, XtNright, XtChainLeft, NULL);
+    v.entry = XtVaCreateWidget("entry", asciiTextWidgetClass, v.mini, XtNeditType, XawtextEdit, XtNfromHoriz, v.prompt,
                                       XtNdisplayCaret, False,
                                       XtNwidth, 600, XtNleft, XtChainLeft, XtNright, XtChainRight, NULL);
     XtOverrideTranslations(v.entry, XtParseTranslationTable(entry_keys));
@@ -952,7 +1075,7 @@ int main(int argc, char **argv) {
         json_set(r, "file", json_string(v.file));
         if (v.environment) json_set(r, "environment", json_string(v.environment));
         service_send(r, reload_reply, NULL);
-        if (v.environment) status("Checked against the %s environment.", base_name(v.environment));
+        if (v.environment) status("Worker types are checked against the environment %s.", base_name(v.environment));
         else status("No environment given: worker types are not checked.");
     }
     if (zoom > 0) MapSetZoom(v.map, zoom);
