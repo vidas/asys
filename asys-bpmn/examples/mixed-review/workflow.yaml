@@ -1,0 +1,138 @@
+# Converted from BPMN process mixed_review by asys workflow convert.
+asys: workflow/1
+name: Parallel search, verification, Senate and human review
+start: brief
+steps:
+  brief:
+    run: single
+    description: Clarify acceptance criteria
+    input:
+      request: Read proposal.md, problem.json and test_route.py. Write requirements.md with concrete
+        acceptance criteria, the two swarm comparison and the separate human decision. Do not modify
+        implementation or tests. Keep your final response concise.
+    next: fork
+  fork:
+    parallel:
+    - global_search
+    - local_search
+    - implement
+    join: evidence
+  global_search:
+    run: route-global
+    description: Global model swarm
+    input:
+      request: Find a closed route visiting each city once with Manhattan length at most 16. Use the
+        observed problem, baseline and measured artifacts.
+  local_search:
+    run: route-local
+    description: Local model swarm
+    input:
+      request: Find a closed route visiting each city once with Manhattan length at most 16. Use the
+        observed problem, baseline and measured artifacts.
+  implement:
+    run: goal
+    description: Implement and independently verify
+    input:
+      request: Implement route_length in route.py according to proposal.md. Run python3 -m unittest 
+        -v and obtain independent verification. Do not change test_route.py. Limit edits to route.py
+        and checker-notes.md; swarm results may arrive concurrently in their own directories.
+  evidence:
+    run: program
+    description: 'Program: check shared evidence'
+    input:
+      request: Compare both saved swarm artifacts using the goal-produced route checker and run all 
+        tests.
+    args:
+    - python3
+    - /opt/asys/environment/programs/compare.py
+    next: review
+  review:
+    run: senate
+    description: Senate review
+    input:
+      request: Review proposal.md, requirements.md, route.py, comparison.json and evidence.md. 
+        Independently check the saved swarm results and run python3 -m unittest -v. Reach an 
+        evidence-based decision with approved as a boolean. Do not modify files. The person decides 
+        the next step after this review.
+    next: human_help
+  human_help:
+    run: human
+    description: 'Human: accept, revise or stop'
+    input:
+      title: Delivery-route decision
+      prompt: Both swarm searches and the verified route checker have been reviewed by the Senate. 
+        Accept writes a local handover report. Revise sends your comments to a goal, rebuilds the 
+        evidence and repeats Senate review. Stop ends this example without acceptance. Which next 
+        step do you want?
+      summary: ${review.final}
+      files:
+      - path: evidence.md
+        label: Measured evidence
+      - path: comparison.json
+        label: Both search results
+      - path: route.py
+        label: Verified route checker
+      - path: requirements.md
+        label: Acceptance criteria
+      context: This decision only controls this local example. Nothing is deployed or published. A 
+        revision must preserve the written contract and tests; describe any requested improvement in
+        the comments.
+      form:
+        type: object
+        properties:
+          action:
+            type: string
+            title: Next step
+            oneOf:
+            - const: accept
+              title: Accept the evidence
+            - const: revise
+              title: Request a revision
+            - const: stop
+              title: Stop without acceptance
+          comments:
+            type: string
+            title: Revision request or decision comments
+        required:
+        - action
+        additionalProperties: false
+      uischema:
+        type: Group
+        label: Human decision
+        elements:
+        - type: Control
+          scope: '#/properties/action'
+          options:
+            format: radio
+        - type: Control
+          scope: '#/properties/comments'
+          options:
+            multi: true
+    next: decision
+  decision:
+    switch:
+    - when: human_help.action = "accept"
+      next: handover
+    - when: human_help.action = "revise"
+      next: revise
+    default: stopped
+  handover:
+    run: single
+    description: Write accepted handover
+    input:
+      request: 'The person accepted the reviewed evidence. Write handover.md summarizing both search scores,
+        verification results, Senate decision and remaining limitations. Read the actual workspace evidence.
+        Human comments: ${(if human_help.comments = null then "None." else human_help.comments)}'
+    next: accepted
+  accepted:
+    end: Accepted
+  revise:
+    run: goal
+    description: 'Goal: resolve human feedback'
+    input:
+      request: 'Read proposal.md and preserve its contract and tests. Address the human feedback in route.py
+        or documentation, then run independent verification. Record what changed in revision.md. Human
+        comments: ${(if human_help.comments = null then "Recheck and improve the evidence." else human_help.comments)}'
+    next: evidence
+  stopped:
+    end: Stopped by human

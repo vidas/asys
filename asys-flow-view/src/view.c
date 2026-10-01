@@ -1119,7 +1119,7 @@ int main(int argc, char **argv) {
         json_set(r, "file", json_string(v.file));
         if (v.environment) json_set(r, "environment", json_string(v.environment));
         service_send(r, reload_reply, NULL);
-        if (v.environment) status("Worker types are checked against the environment %s.", base_name(v.environment));
+        if (v.environment) status("Worker types are checked against %s.", v.environment);
         else status("No environment given: worker types are not checked.");
     }
     show_title();

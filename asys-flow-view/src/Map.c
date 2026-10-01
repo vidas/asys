@@ -30,7 +30,15 @@
 #define RAIL 2.0
 #define THIN 1.25
 #define MARGIN 40.0
-#define LINE_GAP 1.4         /* units between wrapped lines: labels and returning rails */
+/* The gap under a line, in units, top to bottom: the steps' labels, the
+ * lane of returns within the line, the lanes of rails leaving for other
+ * lines; then, above the next line, the lanes of rails arriving there. */
+#define LINE_GAP 1.8
+#define LANE_RETURN 0.5
+#define LANE_ONWARD 0.75
+#define LANE_BACK 1.0
+#define LANE_ARRIVE 0.35     /* above the target line */
+#define LANE_ARRIVE_BACK 0.6
 #define BAR 7.0              /* scrollbar thickness */
 
 enum { C_PAPER, C_INK, C_RAIL, C_CAMPO, C_VERDE, C_BLU, C_ROSSO, C_GIALLO };
@@ -261,9 +269,8 @@ static int route(MapWidget w, const MapEdge *e, Point *points) {
          * rail just before it, never along another step's rail. A return to an
          * earlier line takes the outer lanes. */
         int back = to->line < from->line;
-        double gap = z(w, LINE_GAP * UNIT_Y);
-        double below = py(w, w->map.line_bottom[from->line]) + gap * (back ? 0.62 : 0.4);
-        double above = py(w, w->map.line_top[to->line]) - gap * (back ? 0.62 : 0.4);
+        double below = py(w, w->map.line_bottom[from->line] + (back ? LANE_BACK : LANE_ONWARD));
+        double above = py(w, w->map.line_top[to->line] - (back ? LANE_ARRIVE_BACK : LANE_ARRIVE));
         double margin = px(w, 0) - z(w, back ? 30 : 16), drop = b.x - z(w, 16);
         Point path[8] = { a, { a.x + z(w, 14), a.y }, { a.x + z(w, 14), below }, { margin, below },
                           { margin, above }, { drop, above }, { drop, b.y }, b };
@@ -272,7 +279,7 @@ static int route(MapWidget w, const MapEdge *e, Point *points) {
     if (e->back || b.x < a.x + z(w, 4)) {
         /* A return: down from the source, back along a lane under the line,
          * and up into the target. */
-        double lane = fmax(py(w, from->ly + from->h), py(w, to->ly + to->h)) + z(w, 0.3 * UNIT_Y);
+        double lane = py(w, w->map.line_bottom[from->line] + LANE_RETURN);   /* under every label of the line */
         Point path[6] = { a, { a.x + z(w, 14), a.y }, { a.x + z(w, 14), lane }, { b.x - z(w, 14), lane },
                           { b.x - z(w, 14), b.y }, b };
         return chamfer(w, path, 6, points);
@@ -359,6 +366,8 @@ static void draw_field(MapWidget w, const MapNode *n, int index) {
 
 /* Steps */
 
+static void describe(MapWidget w, const MapNode *n, double cx, double line);
+
 static void draw_step(MapWidget w, const MapNode *n, int index) {
     Point in = node_in(w, n), out = node_out(w, n);
     double cx = is_gateway(n) ? out.x : (in.x + out.x) / 2, y = in.y, size = z(w, STEP);   /* a gateway sits at the split */
@@ -410,6 +419,10 @@ static void draw_step(MapWidget w, const MapNode *n, int index) {
         if (*what) caps(w, &w->map.text_soft, cx - what_width / 2, line + z(w, 15), what, 0);
     }
     line += z(w, 15);
+    if (n->label && strcmp(n->label, n->step) && !is_gateway(n)) {
+        line += z(w, 15);
+        describe(w, n, cx, line);
+    }
     if (w->map.states && n->state == STATE_FAILED) {
         line += z(w, 14);
         double width = caps(w, NULL, 0, 0, "failed", 1);
@@ -421,10 +434,21 @@ static void draw_step(MapWidget w, const MapNode *n, int index) {
         rectangle(w, C_INK, x - z(w, 9), line - z(w, 5), z(w, 5), z(w, 2));
         caps(w, &w->map.text_ink, x, line, "problem", 0);
     }
-    if (n->label && strcmp(n->label, n->step)) {   /* a description reads above the step */
-        double width = text_width(w, w->map.sans, n->label);
-        text(w, w->map.sans, &w->map.text_soft, cx - width / 2, y - size - z(w, 8), n->label);
+}
+
+/* A step's description, under its ID and worker, shortened to its column:
+ * above the rail is where branches and returning rails run. */
+static void describe(MapWidget w, const MapNode *n, double cx, double line) {
+    if (!n->label || !strcmp(n->label, n->step) || is_gateway(n) || !strcmp(n->kind, "end")) return;
+    double room = z(w, 1.9 * UNIT_X);
+    char shown[256];
+    snprintf(shown, sizeof shown, "%s", n->label);
+    for (size_t length = strlen(shown); length > 1 && text_width(w, w->map.sans, shown) > room; ) {
+        length--;
+        while (length > 1 && (shown[length] & 0xC0) == 0x80) length--;
+        snprintf(shown + length, sizeof shown - length, "…");
     }
+    text(w, w->map.sans, &w->map.text_soft, cx - text_width(w, w->map.sans, shown) / 2, line, shown);
 }
 
 static int scrollbar(MapWidget w, int axis, double *track, double *start, double *length);

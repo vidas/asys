@@ -11,10 +11,20 @@ From the repository root, create a fresh example directory:
 ```sh
 python3 asys-bpmn/examples/mixed-review/prepare.py /tmp/asys-mixed-review
 tools/asys-run /tmp/asys-mixed-review/environment \
-  asys-bpmn/examples/mixed-review/workflow.bpmn \
+  asys-bpmn/examples/mixed-review/workflow.yaml \
   --workspace /tmp/asys-mixed-review/workspace \
   --input asys-bpmn/examples/mixed-review/request.md \
   --name mixed-review
+```
+
+`workflow.yaml` is the workflow file; `workflow.bpmn` is the same workflow in
+BPMN, which runs on the BPMN engine while both formats are supported. To see
+the workflow, or follow the run:
+
+```sh
+asys-flow-view -environment /tmp/asys-mixed-review/environment \
+  asys-bpmn/examples/mixed-review/workflow.yaml
+asys-flow-view -run RUN
 ```
 
 The environment uses the configured system models. Add `--model PROVIDER/MODEL`
