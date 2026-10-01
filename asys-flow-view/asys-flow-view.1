@@ -41,8 +41,10 @@ and output; that process loads, lays out, edits, validates and saves.
 .BI \-environment " dir"
 Check worker types, program arguments and human forms against the worker
 environment in
-.IR dir .
-Without it, everything else is checked.
+.IR dir ,
+and colour each step by the kind of worker its type is. The default is
+.BR $ASYS_ENVIRONMENT_DIR ;
+without either, steps are grey and everything but worker types is checked.
 .TP
 .BI \-run " run"
 Follow a run: a run ID, an unambiguous prefix of one, or its directory.
@@ -151,6 +153,11 @@ The X server to use.
 .B XENVIRONMENT
 A resource file read in place of the host's defaults; see
 .BR X (7).
+.TP
+.B ASYS_ENVIRONMENT_DIR
+The worker environment, when
+.B \-environment
+is not given: the variable asys sets for its jobs.
 .TP
 .B ASYS_FLOW_SERVICE
 When set, overrides the \fBservice\fR resource.

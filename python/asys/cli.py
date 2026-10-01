@@ -1,6 +1,7 @@
 """Command-line parsing and dispatch for the asys host tools."""
 import argparse
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -141,7 +142,9 @@ def arguments(argv):
                            'Validate a workflow and the files it calls')
     checking.add_argument('file', type=Path, metavar='FILE')
     checking.add_argument('--environment', type=Path, metavar='DIRECTORY',
-                          help='also check worker types, program arguments and human forms against this environment')
+                          default=os.environ.get('ASYS_ENVIRONMENT_DIR') or None,
+                          help='also check worker types, program arguments and human forms against this environment '
+                               '(default: $ASYS_ENVIRONMENT_DIR)')
     checking.add_argument('--json', action='store_true', help='print problems as a JSON list')
     add_command(operations, 'serve', serve_workflows,
                 'Edit workflows through JSON requests on stdin, one per line (used by viewers)')

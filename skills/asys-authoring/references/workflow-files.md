@@ -81,7 +81,8 @@ form allows; `asys workflow check` reports it otherwise.
 
 ## Seeing and editing
 
-`asys-flow-view [-environment dir] workflow.yaml` shows and edits the file on
+`asys-flow-view [-environment dir] workflow.yaml` (the environment defaults to
+`$ASYS_ENVIRONMENT_DIR`, as for `asys workflow check`) shows and edits the file on
 X11; `asys-flow-view -run run` follows a run. Edits keep comments and order.
 
 ## From BPMN

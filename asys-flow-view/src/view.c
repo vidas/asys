@@ -992,7 +992,9 @@ int main(int argc, char **argv) {
     if (options.help) usage(stdout, 0);
     if (argc > 2 || (argc == 2 && argv[1][0] == '-')) usage(stderr, 2);
     v.file = argc == 2 ? strdup(argv[1]) : NULL;
-    v.environment = options.environment ? strdup(options.environment) : NULL;
+    /* The environment asys gives its jobs, ASYS_ENVIRONMENT_DIR, unless -environment names another. */
+    const char *from_shell = getenv("ASYS_ENVIRONMENT_DIR");
+    v.environment = options.environment ? strdup(options.environment) : from_shell && *from_shell ? strdup(from_shell) : NULL;
     v.run = options.run ? strdup(options.run) : NULL;
     v.root = options.root ? strdup(options.root) : NULL;
     if (!v.file == !v.run) usage(stderr, 2);
