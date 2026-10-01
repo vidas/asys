@@ -201,13 +201,26 @@ static void show_issues(void) {
         v.problem_steps[v.problem_count++] = step;
     }
     char title[64];
-    if (v.problem_count) snprintf(title, sizeof title, "Problems (%d)", v.problem_count);
-    else snprintf(title, sizeof title, "%s", v.run_mode ? "" : selected ? "No problems in this step" : "No problems");
+    snprintf(title, sizeof title, v.problem_count == 1 ? "1 problem" : "%d problems", v.problem_count);
     XtVaSetValues(v.issues_title, XtNlabel, title, NULL);
     v.listed = v.problem_count;
     if (!v.listed) { v.problem_lines[0] = strdup(""); v.problem_steps[0] = NULL; v.listed = 1; }
     v.problem_lines[v.listed] = NULL;
     XawListChange(v.issues, (const char **)v.problem_lines, v.listed, 0, True);
+    /* No problems, no space; otherwise as many lines as there are, up to four. */
+    if (!v.problem_count || v.run_mode) {
+        XtUnmanageChild(v.issues_title);
+        XtUnmanageChild(v.issues_view);
+        return;
+    }
+    XFontStruct *font;
+    Dimension spacing;
+    XtVaGetValues(v.issues, XtNfont, &font, XtNrowSpacing, &spacing, NULL);
+    int rows = v.problem_count < 4 ? v.problem_count : 4;
+    Dimension height = (Dimension)(rows * (font->ascent + font->descent + spacing) + 8);
+    XtVaSetValues(v.issues_view, XtNpreferredPaneSize, height, XtNmin, height, XtNmax, height, NULL);
+    XtManageChild(v.issues_title);
+    XtManageChild(v.issues_view);
 }
 
 static void show_problems(const Json *problems) {
@@ -265,9 +278,19 @@ static void clear_rows(void) {
 }
 
 static void show_rows(void) {
+    Dimension width = 0;
+    XtVaGetValues(v.fields_view, XtNwidth, &width, NULL);
+    Dimension text_width = width > 200 ? (Dimension)(width - 160) : 400;
+    XtVaSetValues(v.fields, XtNwidth, (Dimension)(text_width + 140), NULL);
     for (int i = 0; i < pooled; i++) {
-        if (i < v.row_count) { XtManageChild(v.rows[i].label); XtManageChild(v.rows[i].text); }
-        else { XtUnmanageChild(v.rows[i].label); XtUnmanageChild(v.rows[i].text); }
+        if (i < v.row_count) {
+            XtVaSetValues(v.rows[i].text, XtNwidth, text_width, NULL);
+            XtManageChild(v.rows[i].label);
+            XtManageChild(v.rows[i].text);
+        } else {
+            XtUnmanageChild(v.rows[i].label);
+            XtUnmanageChild(v.rows[i].text);
+        }
     }
 }
 
@@ -642,7 +665,8 @@ static void command(const char *name) {
     }
     if (!strcmp(name, "toggle yaml")) {
         v.yaml_shown = !v.yaml_shown;
-        if (v.yaml_shown) XtManageChild(v.yaml); else XtUnmanageChild(v.yaml);
+        if (v.yaml_shown) XtManageChild(v.notes);
+        else XtUnmanageChild(v.notes);
         return;
     }
     if (!strcmp(name, "quit")) {
@@ -839,11 +863,37 @@ static void FieldNext(Widget w, XEvent *e, String *params, Cardinal *count) {
         if (v.rows[i].text == w) { focus(v.rows[(i + 1) % v.row_count].text); return; }
 }
 
+/* The wheel scrolls the Viewport around the widget it turns over; Athena's
+ * Viewport has no wheel binding of its own. */
+static void WheelScroll(Widget w, XEvent *e, String *params, Cardinal *count) {
+    (void)e;
+    Widget port = w;
+    while (port && !XtIsSubclass(port, viewportWidgetClass)) port = XtParent(port);
+    if (!port || !*count) return;
+    WidgetList children;
+    Cardinal number;
+    XtVaGetValues(port, XtNchildren, &children, XtNnumChildren, &number, NULL);
+    if (!number) return;
+    Position y;
+    XtVaGetValues(children[number - 1], XtNy, &y, NULL);   /* the scrolled child sits above the port by its offset */
+    int top = -y + (!strcmp(params[0], "up") ? -48 : 48);
+    XawViewportSetCoordinates(port, 0, (Position)(top < 0 ? 0 : top));
+}
+
 static XtActionsRec actions[] = {
     { "command", Command }, { "palette", Palette }, { "mini-accept", MiniAccept }, { "mini-cancel", MiniCancel },
     { "mini-move", MiniMove }, { "field-commit", FieldCommit }, { "field-leave", FieldLeave },
-    { "focus-inspector", FocusInspector }, { "field-next", FieldNext },
+    { "focus-inspector", FocusInspector }, { "field-next", FieldNext }, { "wheel-scroll", WheelScroll },
 };
+
+static char wheel_keys[] =
+    "<Btn4Down>: wheel-scroll(up)\n"
+    "<Btn5Down>: wheel-scroll(down)\n";
+
+/* Text panes scroll by three lines a notch. */
+static char text_wheel_keys[] =
+    "<Btn4Down>: scroll-one-line-down() scroll-one-line-down() scroll-one-line-down()\n"
+    "<Btn5Down>: scroll-one-line-up() scroll-one-line-up() scroll-one-line-up()\n";
 
 /* Flat surfaces in the style guide's palette: paper, campo for the panel and
  * fields, 1-px rules at ink 45 %, Helvetica throughout and Courier for
@@ -873,9 +923,9 @@ static String fallback[] = {
     "AsysFlowView*about.heading.internalHeight: 8",
     "AsysFlowView*about.subheading.foreground: #6E675B",
     "AsysFlowView*about.subheading.internalWidth: 14",
-    "AsysFlowView*notes.issuesTitle.font: -adobe-helvetica-bold-r-normal--12-*-*-*-p-*-iso8859-1",
-    "AsysFlowView*notes.issuesTitle.internalWidth: 14",
-    "AsysFlowView*notes.issuesTitle.internalHeight: 8",
+    "AsysFlowView*about.issuesTitle.font: -adobe-helvetica-bold-r-normal--12-*-*-*-p-*-iso8859-1",
+    "AsysFlowView*about.issuesTitle.internalWidth: 14",
+    "AsysFlowView*about.issuesTitle.internalHeight: 2",
     "AsysFlowView*fields.defaultDistance: 6",
     "AsysFlowView*fields*key.foreground: #6E675B",
     "AsysFlowView*fields*value.background: #EFE7D6",
@@ -927,7 +977,9 @@ static char entry_keys[] =
 static char field_keys[] =
     "<Key>Return: field-commit() field-leave()\n"
     "<Key>Tab: field-commit() field-next()\n"
-    "<Key>Escape: field-leave()\n";
+    "<Key>Escape: field-leave()\n"
+    "<Btn4Down>: wheel-scroll(up)\n"
+    "<Btn5Down>: wheel-scroll(down)\n";
 
 static Widget menu(Widget bar, const char *name, const char *label, const char *const entries[][2]) {
     Widget button = XtVaCreateManagedWidget(name, menuButtonWidgetClass, bar, XtNlabel, label, XtNmenuName, name, NULL);
@@ -1004,11 +1056,11 @@ int main(int argc, char **argv) {
     XtAddCallback(v.map, XtNconnectCallback, map_connected, NULL);
 
     v.side = XtVaCreateManagedWidget("side", panedWidgetClass, v.split, XtNorientation, XtorientHorizontal,
-                                     XtNpreferredPaneSize, 210, XtNmin, 120, XtNskipAdjust, True, XtNinternalBorderWidth, 1, NULL);
+                                     XtNpreferredPaneSize, 250, XtNmin, 120, XtNskipAdjust, True, XtNinternalBorderWidth, 1, NULL);
     v.about = XtVaCreateManagedWidget("about", panedWidgetClass, v.side, XtNorientation, XtorientVertical,
-                                      XtNwidth, 640, XtNmin, 300, XtNinternalBorderWidth, 0, NULL);
-    v.notes = XtVaCreateManagedWidget("notes", panedWidgetClass, v.side, XtNorientation, XtorientVertical,
-                                      XtNwidth, 640, XtNmin, 200, XtNinternalBorderWidth, 0, NULL);
+                                      XtNwidth, 1280, XtNmin, 300, XtNinternalBorderWidth, 0, NULL);
+    v.notes = XtVaCreateWidget("notes", panedWidgetClass, v.side, XtNorientation, XtorientVertical,
+                               XtNwidth, 560, XtNmin, 200, XtNinternalBorderWidth, 0, NULL);   /* the YAML, when shown */
     Display *display = XtDisplay(v.top);
     v.mono_heading = XLoadQueryFont(display, "-adobe-courier-bold-r-normal--18-*-*-*-m-*-iso8859-1");
     v.sans_heading = XLoadQueryFont(display, "-adobe-helvetica-bold-r-normal--18-*-*-*-p-*-iso8859-1");
@@ -1018,6 +1070,16 @@ int main(int argc, char **argv) {
                                         XtNfont, v.sans_heading, XtNshowGrip, False, XtNskipAdjust, True, NULL);
     v.subheading = XtVaCreateManagedWidget("subheading", labelWidgetClass, v.about, XtNlabel, "", XtNjustify, XtJustifyLeft,
                                            XtNshowGrip, False, XtNskipAdjust, True, NULL);
+    v.issues_title = XtVaCreateWidget("issuesTitle", labelWidgetClass, v.about, XtNlabel, "", XtNjustify, XtJustifyLeft,
+                                      XtNshowGrip, False, XtNskipAdjust, True, NULL);
+    v.issues_view = XtVaCreateWidget("issuesView", viewportWidgetClass, v.about, XtNallowVert, True, XtNheight, 40,
+                                     XtNshowGrip, False, XtNskipAdjust, True, NULL);
+    v.problem_lines[0] = strdup("");
+    v.problem_lines[1] = NULL;
+    v.listed = 1;
+    v.issues = XtVaCreateManagedWidget("issues", listWidgetClass, v.issues_view, XtNlist, v.problem_lines,
+                                       XtNdefaultColumns, 1, XtNforceColumns, True, XtNverticalList, True, NULL);
+    XtAddCallback(v.issues, XtNcallback, issue_chosen, NULL);
     if (v.run_mode) {
         v.details = XtVaCreateManagedWidget("details", asciiTextWidgetClass, v.about, XtNscrollVertical, XawtextScrollWhenNeeded,
                                             XtNwrap, XawtextWrapLine, XtNeditType, XawtextRead, XtNstring, "",
@@ -1029,21 +1091,9 @@ int main(int argc, char **argv) {
         v.fields = XtVaCreateManagedWidget("fields", formWidgetClass, v.fields_view, XtNwidth, 600, XtNheight, 40, NULL);
         v.details = XtVaCreateWidget("details", asciiTextWidgetClass, v.about, XtNeditType, XawtextRead, NULL);
     }
-    v.issues_title = XtVaCreateManagedWidget("issuesTitle", labelWidgetClass, v.notes, XtNlabel, "", XtNjustify, XtJustifyLeft,
-                                             XtNshowGrip, False, XtNskipAdjust, True, NULL);
-    v.issues_view = XtVaCreateManagedWidget("issuesView", viewportWidgetClass, v.notes, XtNallowVert, True, XtNheight, 160,
-                                            XtNpreferredPaneSize, 400, XtNmin, 40,
-                                            XtNshowGrip, False, NULL);
-    v.problem_lines[0] = strdup("");
-    v.problem_lines[1] = NULL;
-    v.listed = 1;
-    v.issues = XtVaCreateManagedWidget("issues", listWidgetClass, v.issues_view, XtNlist, v.problem_lines,
-                                       XtNdefaultColumns, 1, XtNforceColumns, True, XtNverticalList, True, NULL);
-    XtAddCallback(v.issues, XtNcallback, issue_chosen, NULL);
-    v.yaml = XtVaCreateWidget("yaml", asciiTextWidgetClass, v.notes, XtNscrollVertical, XawtextScrollWhenNeeded,
+    v.yaml = XtVaCreateManagedWidget("yaml", asciiTextWidgetClass, v.notes, XtNscrollVertical, XawtextScrollWhenNeeded,
                               XtNpreferredPaneSize, 400, XtNmin, 60,
                               XtNeditType, XawtextRead, XtNstring, "", XtNdisplayCaret, False, NULL);
-    if (v.run_mode) XtUnmanageChild(v.notes);   /* a run is not edited: its details take the strip */
 
     v.mini = XtVaCreateManagedWidget("mini", formWidgetClass, v.paned, XtNshowGrip, False, XtNskipAdjust, True, NULL);
     v.prompt = XtVaCreateManagedWidget("prompt", labelWidgetClass, v.mini, XtNlabel, "/ finds steps and commands",
@@ -1059,6 +1109,11 @@ int main(int argc, char **argv) {
                                         XtNdefaultColumns, 1, XtNforceColumns, True, NULL);
     XtAddCallback(v.matches, XtNcallback, match_chosen, NULL);
 
+    XtTranslations wheel = XtParseTranslationTable(wheel_keys), text_wheel = XtParseTranslationTable(text_wheel_keys);
+    if (v.fields) XtOverrideTranslations(v.fields, wheel);
+    XtOverrideTranslations(v.issues, wheel);
+    XtOverrideTranslations(v.yaml, text_wheel);
+    XtOverrideTranslations(v.details, text_wheel);
     XtRealizeWidget(v.top);
     focus(NULL);
 

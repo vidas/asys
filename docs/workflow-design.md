@@ -389,10 +389,12 @@ Old widgets, current interaction practice:
   above its target's line; scrollbars appear only when the lines outgrow the
   window, and a spec line (name, format, steps, file) opens the page;
 - the panel is a strip beneath the map, so the map keeps the window's width,
-  and it is never empty: on the left the selected step's ID and fields, on the
-  right its problems; with nothing selected, the workflow's own fields and
-  every problem, each leading to its step; in a run, the run's progress or the
-  step's jobs, results and logs; Tab hides it;
+  and it is never empty: the selected step's ID and fields across its width,
+  and beneath them its problems, taking room only when there are some; with
+  nothing selected, the workflow's own fields and every problem, each leading
+  to its step; in a run, the run's progress or the step's jobs, results and
+  logs; the YAML (y) opens a column beside them; Tab hides the strip; the wheel
+  scrolls whatever it is over;
 - the menu bar is the standard Athena one, MenuButtons and SimpleMenus listing
   each command's key; messages and prompts share the line at the bottom;
 - keyboard first: every action has a key, and a command palette (`/`) finds
