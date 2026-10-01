@@ -47,7 +47,7 @@ test('status reads archived jobs and their actual error without Docker or a work
   assert.equal(result.jobs[0].name, 'design_module');
   assert.match(result.jobs[0].detail, /Agent prompt must be a nonempty string/);
   assert.match(result.error, /Agent prompt must be a nonempty string/);
-  const table = await exec('python3', [cli, 'status', '--root', root]);
+  const table = await exec('python3', [cli, 'ps', '--root', root]);
   assert.match(table.stdout, /pcb-engineer/);
   assert.match(table.stdout, /failed/);
 });
@@ -77,8 +77,9 @@ test('run prefixes must be unambiguous and nonexistent state stays nonexistent',
   await json(join(other, 'run.json'), { ...record, id: 'abcd9999999999999999999999999999' });
   await assert.rejects(exec('python3', [cli, 'status', 'abcd', '--root', root]), error => /ambiguous/i.test(error.stderr));
   const absent = join(root, 'absent');
-  const { stdout } = await exec('python3', [cli, 'status', '--root', absent, '--json']);
+  const { stdout } = await exec('python3', [cli, 'ps', '--root', absent, '--json']);
   assert.deepEqual(JSON.parse(stdout), []);
+  await exec('python3', [cli, 'status', '--root', absent, '--json'], { env: { ...process.env, DCOMP_BINARY: '/not-installed/dcomp' } });
   await assert.rejects(readFile(absent), { code: 'ENOENT' });
 });
 
