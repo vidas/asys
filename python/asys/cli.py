@@ -1,5 +1,6 @@
 """Command-line parsing and dispatch for the asys host tools."""
 import argparse
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -19,6 +20,21 @@ from .options import ROOT_HELP
 def dashboard(args):
     from .dashboard import dashboard as serve
     return serve(args)
+
+
+def check_workflow(args):
+    from . import flow
+    problems = []
+    workflow = flow.load_all(args.file, problems)
+    problems += flow.check(workflow, args.environment)
+    if args.json:
+        print(json.dumps(problems, indent=2))
+    else:
+        for problem in problems:
+            print(problem)
+        print(f'{args.file}: ' + ('valid' if not problems else f'{len(problems)} problem(s)'))
+    if problems:
+        raise SystemExit(1)
 
 
 def system_or_run_status(args):
@@ -93,6 +109,17 @@ def arguments(argv):
 
     add_command(commands, 'version', version,
                 'Show the installed release and the release each running service uses', parents=[state])
+
+    workflows = commands.add_parser('workflow', allow_abbrev=False,
+        help='Check, edit and inspect workflow files',
+        description='Check, edit and inspect workflow files (workflow/1 YAML).')
+    operations = workflows.add_subparsers(dest='operation', required=True, metavar='COMMAND')
+    checking = add_command(operations, 'check', check_workflow,
+                           'Validate a workflow and the files it calls')
+    checking.add_argument('file', type=Path, metavar='FILE')
+    checking.add_argument('--environment', type=Path, metavar='DIRECTORY',
+                          help='also check worker types, program arguments and human forms against this environment')
+    checking.add_argument('--json', action='store_true', help='print problems as a JSON list')
 
     guide = add_command(commands, 'skill', skill,
                         'Locate or export the operating and authoring skills', validate=validate_skill)

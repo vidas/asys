@@ -1,0 +1,4 @@
+# Private host dependencies of the asys commands, installed beside them; the
+# user's Python environment is never changed. ruamel.yaml reads and edits
+# workflow files without losing comments; its optional C extension is not used.
+ruamel.yaml==0.18.15

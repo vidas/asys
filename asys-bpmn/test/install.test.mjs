@@ -23,6 +23,7 @@ test('make install is self-contained and preserves saved run records', async t =
   await cp(join(source, '../Makefile'), join(root, 'checkout/Makefile'));
   await cp(join(source, '../build.mk'), join(root, 'checkout/build.mk'));
   await cp(join(source, '../VERSION'), join(root, 'checkout/VERSION'));
+  await cp(join(source, '../.host-deps'), join(root, 'checkout/.host-deps'), { recursive: true });
   await cp(join(source, '../tools'), join(root, 'checkout/tools'), { recursive: true });
   await cp(join(source, '../python'), join(root, 'checkout/python'), { recursive: true });
   await cp(join(source, '../skills'), join(root, 'checkout/skills'), { recursive: true });

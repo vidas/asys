@@ -15,7 +15,7 @@ async function checkout(t, extra = []) {
   t.after(() => rm(root, { recursive: true, force: true }));
   const project = join(root, 'checkout');
   await mkdir(project);
-  for (const path of ['Makefile', 'build.mk', 'VERSION', 'LICENSE', 'tools', 'python', 'skills', 'designs', 'asys-runtime/asys_runtime',
+  for (const path of ['Makefile', 'build.mk', 'VERSION', 'LICENSE', '.host-deps', 'tools', 'python', 'skills', 'designs', 'asys-runtime/asys_runtime',
     'asys-runtime/LICENSE.multiagent', 'asys-workers/asys_swarm', 'asys-workers/worlds', ...extra]) {
     await cp(join(source, path), join(project, path), { recursive: true });
   }

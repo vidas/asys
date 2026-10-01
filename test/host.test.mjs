@@ -136,3 +136,7 @@ launcher.say('FINISHED  Generate reports')
 `, launcher, run]);
   assert.match((await exec('python3', [cli, 'logs', run])).stdout, /FINISHED  Generate reports/);
 });
+
+test('workflow files load their calls and are validated against the environment', async () => {
+  await exec('python3', [fileURLToPath(new URL('./flow.py', import.meta.url))]);
+});

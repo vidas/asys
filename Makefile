@@ -5,6 +5,7 @@ include build.mk
 PREFIX ?= $(HOME)/.local
 DESTDIR ?=
 PYTHON ?= python3
+HOST_DEPS ?= .host-deps
 NODE ?= node
 NPM ?= npm
 export PREFIX DESTDIR
@@ -18,11 +19,17 @@ REMOVED_HOST_MODULES := oneshot goal senate swarm swarm_view
 
 all: build
 
-host:
+host: $(HOST_DEPS)/.installed
 	@set -e; for name in $(HOST_TOOLS); do install -D -m 0755 "tools/$$name" "bin/$$name"; done
 	@set -e; for name in $(REMOVED_HOST_TOOLS); do rm -f "bin/$$name" "$$name/bin/$$name"; done
 
+# Private Python dependencies of the host commands; see python/requirements-host.txt.
+$(HOST_DEPS)/.installed: python/requirements-host.txt
+	$(PYTHON) -m pip install --disable-pip-version-check --no-compile --no-deps --upgrade --target "$(HOST_DEPS)" -r python/requirements-host.txt
+	touch "$@"
+
 install-host: install-skills install-designs
+	@test -f "$(HOST_DEPS)/.installed" || { echo "Host dependencies are not built; run make first." >&2; exit 1; }
 	@set -e; for name in $(REMOVED_HOST_TOOLS); do rm -f "$(DESTDIR)$(PREFIX)/bin/$$name"; done
 	@set -e; for name in $(REMOVED_HOST_MODULES); do \
 		rm -f "$(DESTDIR)$(PREFIX)/share/asys/python/asys/$$name.py" \
@@ -45,6 +52,10 @@ install-host: install-skills install-designs
 	install -m 0644 asys-runtime/asys_runtime/*.py "$(DESTDIR)$(PREFIX)/share/asys/python/asys_runtime/"
 	install -m 0644 LICENSE "$(DESTDIR)$(PREFIX)/share/asys/"
 	install -m 0644 asys-runtime/LICENSE.multiagent "$(DESTDIR)$(PREFIX)/share/asys/"
+	rm -rf -- "$(DESTDIR)$(PREFIX)/share/asys/vendor"
+	install -d "$(DESTDIR)$(PREFIX)/share/asys/vendor"
+	cp -a "$(HOST_DEPS)/." "$(DESTDIR)$(PREFIX)/share/asys/vendor/"
+	rm -f "$(DESTDIR)$(PREFIX)/share/asys/vendor/.installed"
 	@if test -f release.json; then install -m 0644 release.json "$(DESTDIR)$(PREFIX)/share/asys/"; \
 	else echo "warning: no release.json; installed commands need images from make build" >&2; fi
 	@if test -d asys-workers/asys_swarm; then \
@@ -86,7 +97,7 @@ install:
 	$(MAKE) -C asys-bpmn install
 	$(MAKE) -C asys-human-interface install
 
-test-deps:
+test-deps: $(HOST_DEPS)/.installed
 	@set -e; for directory in $(JS_PACKAGES); do $(NPM) --prefix "$$directory" ci --ignore-scripts; done
 	$(MAKE) -C asys-human-interface host-deps
 

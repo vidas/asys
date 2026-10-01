@@ -5,7 +5,8 @@ import sys
 
 executable = Path(__file__).resolve()
 root = executable.parents[1]
-for directory in (root / 'asys-runtime', root / 'asys-workers', root / 'share/asys/python', root / 'python'):
+for directory in (root / 'share/asys/vendor', root / '.host-deps', root / 'asys-runtime', root / 'asys-workers',
+                  root / 'share/asys/python', root / 'python'):
     if directory.is_dir():
         sys.path.insert(0, str(directory))
 from asys.run import main

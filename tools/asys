@@ -4,6 +4,9 @@ from pathlib import Path
 import sys
 
 executable = Path(__file__).resolve()
+for directory in (executable.parents[1] / 'share/asys/vendor', executable.parents[1] / '.host-deps'):
+    if directory.is_dir():
+        sys.path.insert(0, str(directory))
 if (executable.parents[1] / 'asys-runtime').is_dir():
     sys.path.insert(0, str(executable.parents[1] / 'asys-runtime'))
 for directory in (executable.parents[1] / "share/asys/python", executable.parents[1] / "python"):
