@@ -1,0 +1,31 @@
+asys: workflow/1
+name: Report team
+description: Write a report, check the artifact, review it, and revise until it is accepted.
+start: implement
+steps:
+  implement:
+    run: implementer
+    description: Write or revise the report
+    input:
+      request: >-
+        Write deliverables/report.md for this request: ${request}
+        Previous review: ${if review = null then "First pass; no earlier review." else review.reason}
+    next: check
+  check:
+    run: check-report             # a program both environments declare
+    description: Check the report artifact
+    next: review
+  review:
+    run: reviewer
+    description: Review evidence and requirements
+    input:
+      request: >-
+        Inspect deliverables/report.md and its sources against this request: ${request}
+        Return approved as a boolean and reason as concrete findings, alongside final and exception.
+    next: decision
+  decision:
+    switch:
+      - when: review.approved = true
+        next: accepted
+    default: implement            # revise with the review's reason
+  accepted: {end: Report accepted}

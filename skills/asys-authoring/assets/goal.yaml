@@ -1,0 +1,10 @@
+asys: workflow/1
+name: Deliver a verified change
+start: deliver
+steps:
+  deliver:
+    run: goal                     # a goal worker declared in the environment
+    description: Implement and verify
+    input: {request: "${request}"}
+    next: done
+  done: {end: Delivered}

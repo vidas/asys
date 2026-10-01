@@ -17,6 +17,12 @@
         "/opt/asys/environment/workers/reviewer.json"
       ]
     },
+    "check-report": {
+      "command": [
+        "python3",
+        "/opt/asys/environment/programs/check_report.py"
+      ]
+    },
     "program": {
       "command": [
         "/opt/asys/asys-workers/tools/asys-program"

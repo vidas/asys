@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -21,7 +21,9 @@ test('the bundled goal template is executable and leaves the goal attempt limit 
   assert.equal(definition.document.diagrams.length, 1);
 });
 
-test('the skill team starter runs real programs through a rejected review, revision, and acceptance', async t => {
+// The team starter, run with its deterministic environment's real programs.
+// LOAD returns the loaded workflow's ID.
+async function teamRun(t, load) {
   const root = await mkdtemp(join(tmpdir(), 'asys-skill-team-'));
   const environment = join(root, 'environment');
   const workspace = join(root, 'workspace');
@@ -54,7 +56,7 @@ test('the skill team starter runs real programs through a rejected review, revis
   child.stdout.resume();
   child.stderr.on('data', chunk => { stderr += chunk; });
   await until(async () => (await environments.list()).some(item => item.name === config.name));
-  const { workflowId } = await runtime.loadWorkflow({ bpmnXml: await readFile(join(assets, 'team/workflow.bpmn'), 'utf8') });
+  const workflowId = await load(runtime);
   await runtime.startRun({ id: 'skill-team', workflowId, environment: config.name,
     variablesJson: JSON.stringify({ request: await readFile(join(assets, 'team/request.md'), 'utf8') }) });
   const run = await until(() => {
@@ -62,11 +64,8 @@ test('the skill team starter runs real programs through a rejected review, revis
     return ['completed', 'failed'].includes(value.status) && value;
   });
   assert.equal(run.status, 'completed', run.error);
-  const output = JSON.parse(run.outputJson);
-  assert.equal(output.review.approved, true);
   const report = await readFile(join(workspace, 'deliverables/report.md'), 'utf8');
   assert.match(report, /## Evidence/);
-  assert.equal(output.check.bytes, Buffer.byteLength(report));
 
   const queue = environments.queue(config.name);
   const states = await Promise.all((await readdir(queue.jobs)).filter(id => !id.startsWith('.')).map(id => queue.state(id)));
@@ -80,4 +79,25 @@ test('the skill team starter runs real programs through a rejected review, revis
   assert.equal(inputs.length, 2);
   assert.ok(inputs.some(input => input.request.includes('First pass; no earlier review.')));
   assert.ok(inputs.some(input => input.request.includes('Add the missing Evidence section.')));
+  return { run, report };
+}
+
+test('the skill team starter runs real programs through a rejected review, revision, and acceptance', async t => {
+  const { run, report } = await teamRun(t, async runtime => (await runtime.loadWorkflow({
+    bpmnXml: await readFile(join(assets, 'team/workflow.bpmn'), 'utf8') })).workflowId);
+  const output = JSON.parse(run.outputJson);
+  assert.equal(output.review.approved, true);
+  assert.equal(output.check.bytes, Buffer.byteLength(report));
+});
+
+test('the YAML team starter runs the same loop with the check program its environment declares', async t => {
+  // The host resolves workflow files; this is what asys-run sends.
+  const resolved = execFileSync('python3', ['-c', `import json, sys
+sys.path[:0] = ${JSON.stringify([join(project, '.host-deps'), join(project, 'python'), join(project, 'asys-runtime')])}
+from asys import flow
+print(json.dumps(flow.resolved(flow.load_all(sys.argv[1]))))`, join(assets, 'team/workflow.yaml')], { encoding: 'utf8' });
+  const { run, report } = await teamRun(t, async runtime => (await runtime.loadWorkflow({ workflow: JSON.parse(resolved) })).workflowId);
+  const variables = JSON.parse(run.variablesJson);
+  assert.equal(variables.review.approved, true);
+  assert.equal(variables.check.bytes, Buffer.byteLength(report));
 });

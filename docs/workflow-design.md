@@ -412,9 +412,28 @@ names another command for the model, for example a checkout's
 
 ## Migration
 
-`asys workflow convert FILE.bpmn` writes the equivalent YAML for the subset the
-examples and templates use and reports anything it cannot express. Both engines
-ship until BPMN is retired by a separate decision.
+`asys workflow convert FILE.bpmn [-o FILE.yaml]` writes the equivalent YAML for
+the subset the examples and templates use: tasks with `asys:job`, sequence
+flows, exclusive gateways (decisions and merges), parallel gateways (forks and
+joins; a branch of several steps becomes a group), ad-hoc subprocesses
+(`choose`) and end events. FEEL contexts become YAML mappings, and string
+concatenation becomes `${...}` text. Result variables, and element IDs that are
+not step IDs, are renamed everywhere they are read.
+
+It writes nothing when part of a process cannot be expressed, and says why:
+inline scripts (declare the program in `workers.json` instead), sequence flows
+inside an ad-hoc subprocess, boundary and intermediate events, call activities
+and BPMN loops. Approximations are written and reported as notes: a job without
+`input` received all variables and now receives `{request}`; a decision with no
+default ends at an end step instead of failing; an error end event becomes an
+end labelled as an error.
+
+Of the repository's BPMN, agent-task, human-prompt, mixed-review, the
+named-swarm fixture and the goal template convert and validate; hello,
+shared-workspace and the team template run inline scripts, and agent-review
+orders its actions with sequence flows. The team and goal templates and the
+hello example ship YAML versions written by hand. Both engines ship until BPMN
+is retired by a separate decision.
 
 ## Open questions
 

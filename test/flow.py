@@ -303,6 +303,51 @@ class RunViewTests(Fixture):
         self.assertEqual(handle(session, {'op': 'step', 'step': 'brief'})['jobs'], [])
 
 
+class ConvertTests(unittest.TestCase):
+    def convert(self, relative):
+        from asys.flow_convert import convert
+        return convert((ROOT / relative).read_text())
+
+    def test_the_mixed_review_example_converts_to_a_valid_workflow_with_its_loop(self):
+        import subprocess
+        text, result = self.convert('asys-bpmn/examples/mixed-review/workflow.bpmn')
+        self.assertEqual(result.problems, [])
+        with tempfile.TemporaryDirectory() as directory:
+            # The example's environment, as its README prepares it.
+            subprocess.run([sys.executable, str(ROOT / 'asys-bpmn/examples/mixed-review/prepare.py'), f'{directory}/example'],
+                           check=True, capture_output=True)
+            path = Path(directory) / 'workflow.yaml'
+            path.write_text(text)
+            workflow = flow.load_all(path)
+            self.assertEqual([str(p) for p in flow.check(workflow, Path(directory) / 'example/environment')], [])
+        steps = workflow.data['steps']
+        self.assertEqual(list(steps['fork']['parallel']), ['global_search', 'local_search', 'implement'])
+        self.assertEqual(steps['fork']['join'], 'evidence')
+        self.assertEqual(steps['revise']['next'], 'evidence')     # the revision loop
+        self.assertEqual(steps['decision']['switch'][0]['when'], 'human_help.action = "accept"')
+        self.assertIn('${(if human_help.comments = null', steps['handover']['input']['request'])
+
+    def test_result_variables_become_step_ids_wherever_they_are_read(self):
+        text, result = self.convert('asys-bpmn/test/fixtures/named-swarm.bpmn')
+        self.assertIn('when: search.output.achieved = true', text)
+        self.assertNotIn('searchResult', text)
+
+    def test_what_a_workflow_file_cannot_express_is_refused_with_the_reason(self):
+        text, result = self.convert('asys-bpmn/examples/hello/workflow.bpmn')
+        self.assertIsNone(text)
+        self.assertIn('declare the program in workers.json', result.problems[0])
+        text, result = self.convert('asys-bpmn/examples/agent-review.bpmn')
+        self.assertIsNone(text)
+        self.assertIn('sequence flows inside an ad-hoc subprocess', result.problems[0])
+
+    def test_feel_contexts_become_yaml_with_text_in_place_of_concatenation(self):
+        from asys.flow_convert import _value
+        self.assertEqual(_value('{request: "Fix: " + issue.title + ".", n: 3, ok: true, tags: ["a", "b"], raw: items}'),
+                         {'request': 'Fix: ${issue.title}.', 'n': 3, 'ok': True, 'tags': ['a', 'b'], 'raw': '${items}'})
+        self.assertEqual(_value('{"quoted key": {inner: null}}'), {'quoted key': {'inner': None}})
+        self.assertEqual(_value('count(items) + 1'), '${count(items) + 1}')
+
+
 class JournalTests(unittest.TestCase):
     def test_asys_logs_reports_workflow_file_steps_like_bpmn_activities(self):
         from asys.workflow_journal import WorkflowHistory

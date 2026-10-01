@@ -5,6 +5,7 @@
   "types": {
     "implementer": {"command": ["python3", "/opt/asys/environment/programs/dummy.py", "implementer"]},
     "reviewer": {"command": ["python3", "/opt/asys/environment/programs/dummy.py", "reviewer"]},
+    "check-report": {"command": ["python3", "/opt/asys/environment/programs/check_report.py"]},
     "program": {"command": ["/opt/asys/asys-workers/tools/asys-program"]}
   }
 }

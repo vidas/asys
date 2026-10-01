@@ -43,7 +43,7 @@ test('make install is self-contained and preserves saved run records', async t =
   const binary = join(prefix, 'bin/asys-run');
   const { stdout } = await exec('python3', ['-I', '-S', binary, '--help'], { cwd: root });
   assert.match(stdout, /usage: asys-run /);
-  assert.match(stdout, /WORKFLOW\.bpmn/);
+  assert.match(stdout, /WORKER\|WORKFLOW \[REQUEST\]/);
   const host = join(prefix, 'bin/asys');
   const help = (await exec('python3', ['-I', '-S', host, '--help'], { cwd: root })).stdout;
   assert.match(help, /top/);

@@ -1,5 +1,22 @@
 # Release notes
 
+## Unreleased
+
+- Write workflows as YAML files (`asys: workflow/1`) whose steps name the
+  environment's worker types and hold no code: run, parallel and join, group,
+  call (another workflow file), switch, repeat, for_each, choose, wait, delay,
+  timeouts, error paths and compensation. `asys-run ENV WORKFLOW.yaml` validates
+  the file and the files it calls, then runs it on a new interpreter in the
+  workflow component; BPMN files still run on the BPMN engine.
+- `asys workflow check` validates a file against an environment; `asys workflow
+  convert` writes the workflow file a BPMN process corresponds to, or says what
+  it cannot express; `asys workflow serve` is the model behind viewers.
+- `asys-flow-view` views and edits workflow files on X11, in the style guide's
+  graphic language, and follows runs live. It builds where the Xaw, Xft and
+  XRender development files are installed.
+- `asys logs` reports workflow file steps. The integration test runs on the
+  release's images again.
+
 ## 0.2.1
 
 - Give every build an identity. `VERSION` names the release; images are tagged

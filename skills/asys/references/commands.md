@@ -6,6 +6,8 @@
 asys-run ENVIRONMENT WORKER [REQUEST] [OPTIONS]
 asys-run ENVIRONMENT WORKFLOW.yaml|WORKFLOW.bpmn [REQUEST] [OPTIONS]
 asys workflow check WORKFLOW.yaml [--environment DIRECTORY] [--json]
+asys workflow convert WORKFLOW.bpmn [-o WORKFLOW.yaml] [--process ID] [--force]
+asys-flow-view [--environment DIRECTORY] WORKFLOW.yaml | --run RUN   (X11 viewer and editor)
 asys-run --resume RUN [--root DIRECTORY] [--human]
 asys-run --upgrade RUN [--root DIRECTORY] [--human]
 asys-workers list ENVIRONMENT [--json]

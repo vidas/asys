@@ -1,6 +1,6 @@
 ---
 name: asys-authoring
-description: Create or change asys environments, named agents, goals, Senates, swarms, program workers, BPMN workflows, human review, world packages and dashboard designs. Use when building an executable asys project or translating a design document into a dashboard theme.
+description: Create or change asys environments, named agents, goals, Senates, swarms, program workers, workflow files (YAML, or BPMN while it remains), human review, world packages and dashboard designs. Use when building an executable asys project or translating a design document into a dashboard theme.
 ---
 
 # Author asys projects
@@ -22,7 +22,7 @@ combine different worker kinds and programs in the same environment.
 | Shared tool knowledge | `ENVIRONMENT/skills/NAME/` |
 | Deterministic checks | `ENVIRONMENT/programs/` |
 | World rules and evaluation | `ENVIRONMENT/worlds/NAME/component/` |
-| Sequencing and handoffs | `workflow.bpmn` |
+| Sequencing and handoffs | `workflow.yaml` (steps name worker types; no code) |
 | Project inputs and deliverables | Separately selected workspace |
 | Dashboard presentation | Design package with `design.json` and CSS |
 
@@ -60,16 +60,18 @@ Obtain actual human answers; deterministic test answers are fixture data only.
 - [Environments and programs](references/environments.md): new environments,
   Docker, tools, prompts, skills and deterministic workers.
 - [Workers](references/workers.md): agent, goal, Senate and swarm definitions.
-- [Workflows](references/workflows.md): BPMN, FEEL, branches, concurrency and errors.
-- [Advanced workflows](references/advanced-workflows.md): loops, coordinators,
-  called processes, messages and integration.
+- [Workflow files](references/workflow-files.md): the YAML format, steps,
+  expressions, human steps, the viewer, and converting BPMN.
+- [BPMN workflows](references/workflows.md) and [advanced BPMN](references/advanced-workflows.md):
+  the earlier format, which still runs; prefer workflow files for new work.
 - [Human help](references/human.md): briefings, forms and revision paths.
 - [Worlds](references/worlds.md): packages, evaluators, protocols and viewers.
 - [Dashboard designs](references/design.md): design document to shared CSS,
   symbols, fonts and logo assets.
 - [Validation](references/validation.md): runnable checks and evidence boundaries.
 
-The [team starter](assets/team/workflow.bpmn) has deterministic and model
-environments for a review/revision loop. The [goal template](assets/goal.bpmn)
-embeds a goal in a workflow. Copy templates into a project before editing them.
+The [team starter](assets/team/workflow.yaml) has deterministic and model
+environments for a review/revision loop, with its check as a declared program.
+The [goal template](assets/goal.yaml) embeds a goal in a workflow. BPMN
+versions of both remain beside them. Copy templates into a project before editing them.
 All linked resources travel with this skill; no source checkout is required.

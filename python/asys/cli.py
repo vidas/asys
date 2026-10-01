@@ -42,6 +42,24 @@ def serve_workflows(args):
     serve()
 
 
+def convert_workflow(args):
+    from .flow_convert import convert
+    text, result = convert(args.file.read_text(encoding='utf-8'), args.process)
+    for note in result.notes:
+        print(f'note: {note}', file=sys.stderr)
+    for problem in result.problems:
+        print(f'cannot convert: {problem}', file=sys.stderr)
+    if text is None:
+        raise SystemExit(1)
+    if args.output is None:
+        sys.stdout.write(text)
+        return
+    if args.output.exists() and not args.force:
+        raise SystemExit(f'{args.output} exists; use --force to replace it')
+    args.output.write_text(text, encoding='utf-8')
+    print(f'Wrote {args.output}; check it with asys workflow check {args.output} --environment ENV', file=sys.stderr)
+
+
 def system_or_run_status(args):
     return status(args) if args.run else overview(args)
 
@@ -127,6 +145,12 @@ def arguments(argv):
     checking.add_argument('--json', action='store_true', help='print problems as a JSON list')
     add_command(operations, 'serve', serve_workflows,
                 'Edit workflows through JSON requests on stdin, one per line (used by viewers)')
+    converting = add_command(operations, 'convert', convert_workflow,
+                             'Write the workflow file a BPMN process corresponds to')
+    converting.add_argument('file', type=Path, metavar='FILE.bpmn')
+    converting.add_argument('-o', '--output', type=Path, metavar='FILE.yaml', help='write here instead of stdout')
+    converting.add_argument('--process', metavar='ID', help='the executable process, when the file has several')
+    converting.add_argument('--force', action='store_true', help='replace an existing output file')
 
     guide = add_command(commands, 'skill', skill,
                         'Locate or export the operating and authoring skills', validate=validate_skill)

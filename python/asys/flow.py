@@ -533,28 +533,34 @@ def _check_call_input(called, given, where, report):
             report(f'{where}.input', f'{called.path.name} needs input {name}')
 
 
-def _check_form(document, step, where, report):
+def _form(document, step):
+    """A human step's form: (schema, None), (None, error), or (None, None) when it has none.
+
+    A form is a JSON Schema, inline or in a file beside the workflow.
+    """
     form = (step.get('input') or {}).get('form') if isinstance(step.get('input'), dict) else None
+    if isinstance(form, dict):
+        return form, None
     if not isinstance(form, str) or form.startswith('${'):
-        return
-    path = (document.path.parent / form).resolve()
+        return None, None
     try:
-        schema = json.loads(path.read_text(encoding='utf-8'))
+        return json.loads((document.path.parent / form).read_text(encoding='utf-8')), None
     except (OSError, ValueError) as error:
-        report(f'{where}.input.form', f'cannot read form {form}: {error}')
-        return
-    if not isinstance(schema, dict) or schema.get('type') != 'object':
-        report(f'{where}.input.form', 'a form is a JSON Schema of type object')
+        return None, f'cannot read form {form}: {error}'
+
+
+def _check_form(document, step, where, report):
+    schema, error = _form(document, step)
+    if error:
+        report(f'{where}.input.form', error)
+    elif schema is not None and not isinstance(schema, dict):
+        report(f'{where}.input.form', 'a form is a JSON Schema: a mapping')
 
 
 def form_choices(document, step):
     """Allowed values of each field of a human step's form, where it enumerates them."""
-    form = (step.get('input') or {}).get('form') if isinstance(step.get('input'), dict) else None
-    if not isinstance(form, str):
-        return {}
-    try:
-        schema = json.loads((document.path.parent / form).read_text(encoding='utf-8'))
-    except (OSError, ValueError):
+    schema, _ = _form(document, step)
+    if not isinstance(schema, dict):
         return {}
     choices = {}
     for field, spec in (schema.get('properties') or {}).items():
