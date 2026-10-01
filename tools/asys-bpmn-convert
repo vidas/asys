@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Convert BPMN workflows to workflow files (asys: workflow/1)."""
+"""Convert BPMN workflows to workflow files (asys: workflow/1).
+
+Run it from an asys checkout; make install does not install it.
+"""
 from pathlib import Path
 import sys
 

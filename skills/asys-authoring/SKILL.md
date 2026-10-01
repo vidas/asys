@@ -67,7 +67,8 @@ Obtain actual human answers; deterministic test answers are fixture data only.
   time, compensation, messages and embedding.
 - [BPMN workflows](references/workflows.md) and [advanced BPMN](references/bpmn-advanced.md):
   the earlier format, which still runs; prefer workflow files for new work.
-  `asys-bpmn-convert DIRECTORY` moves a project's BPMN to workflow files.
+  `asys workflow convert` converts a BPMN file; an asys checkout's
+  `tools/asys-bpmn-convert DIRECTORY` (not installed) moves a whole project.
 - [Human help](references/human.md): briefings, forms and revision paths.
 - [Worlds](references/worlds.md): packages, evaluators, protocols and viewers.
 - [Dashboard designs](references/design.md): design document to shared CSS,

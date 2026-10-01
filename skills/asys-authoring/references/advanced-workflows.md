@@ -187,4 +187,4 @@ Workflow files hold no code: no inline scripts, and no expression steps that
 set variables; compute values in the step that needs them, or in a program the
 environment declares. There are no data objects, signals, conditional events,
 inclusive or event-based gateways, error codes, non-interrupting events or
-loop counters. `asys-bpmn-convert` names these when a BPMN process uses them.
+loop counters. `asys workflow convert` names these when a BPMN process uses them.

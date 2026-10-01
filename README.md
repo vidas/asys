@@ -37,7 +37,8 @@ tools installed in their environment. Agents use the Pi coding-agent SDK,
 programs run commands, and human steps wait for an answer. Workflows are
 short YAML files whose steps name the environment's workers and carry no code;
 `asys-flow-view` draws, edits and runs them on X11. BPMN 2.0 workflows still
-run, and `asys-bpmn-convert` moves them to workflow files.
+run, and an asys checkout's `tools/asys-bpmn-convert` (not installed) moves
+them to workflow files.
 
 ## 02 · Kinds of work
 

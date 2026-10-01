@@ -8,7 +8,7 @@ asys-run ENVIRONMENT WORKFLOW.yaml|WORKFLOW.bpmn [REQUEST] [OPTIONS]
 asys workflow check WORKFLOW.yaml [--environment DIRECTORY] [--json]
 asys workflow convert WORKFLOW.bpmn [-o WORKFLOW.yaml] [--process ID] [--force]
 asys workflow resolve WORKFLOW.yaml        (the document a run loads, for the Workflow service)
-asys-bpmn-convert [--dry-run] [--force] FILE.bpmn|DIRECTORY ...   (move projects to workflow files)
+tools/asys-bpmn-convert [--dry-run] [--force] FILE.bpmn|DIRECTORY ...   (in an asys checkout; not installed)
 asys-flow-view [-environment DIRECTORY] WORKFLOW.yaml | -run RUN   (X11 viewer; see its man page)
 asys-run --resume RUN [--root DIRECTORY] [--human]
 asys-run --upgrade RUN [--root DIRECTORY] [--human]

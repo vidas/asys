@@ -91,7 +91,8 @@ RUN` follows any run. See `asys-flow-view(1)`.
 
 ## From BPMN
 
-`asys-bpmn-convert DIRECTORY` converts every BPMN workflow of a project to a
+In an asys checkout, `tools/asys-bpmn-convert DIRECTORY` (not installed)
+converts every BPMN workflow of a project to a
 workflow file beside it, validates it, and lists the files that still mention
 BPMN (tests, docs) for you to change; the BPMN keeps running meanwhile.
 `asys workflow convert workflow.bpmn -o workflow.yaml` converts one file and writes the equivalent
