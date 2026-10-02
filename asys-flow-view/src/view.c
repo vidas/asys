@@ -27,6 +27,7 @@
 #include <X11/Xaw/SimpleMenu.h>
 #include <X11/Xaw/SmeBSB.h>
 #include <X11/Xaw/SmeLine.h>
+#include <X11/Xaw/Toggle.h>
 #include <X11/Xaw/Viewport.h>
 #include <X11/Xmu/Editres.h>
 
@@ -47,6 +48,12 @@
 #define MAX_ROWS 128
 #define MAX_ITEMS 512
 #define PALETTE_ROWS 14
+#define MAX_DEPTH 16
+
+/* Run mode's panel shows one job of the selected step in one of these views. */
+static const char *const VIEWS[] = { "summary", "transcript", "logs", "result" };
+static const char *const VIEW_LABELS[] = { "Summary", "Transcript", "Logs", "Result" };
+enum { VIEW_COUNT = 4 };
 
 typedef enum { MINI_NONE, MINI_PALETTE, MINI_RENAME, MINI_ADD, MINI_CONNECT, MINI_ON_ERROR, MINI_FIELD,
                MINI_RUN, MINI_FOLLOW, MINI_NEW, MINI_OPEN } MiniMode;
@@ -79,6 +86,16 @@ static struct {
     String problem_lines[MAX_ITEMS + 1];
     char *problem_steps[MAX_ITEMS];
     int problem_count, listed;        /* listed: the lines the issues List holds */
+    /* Run mode: the file shown, and the call steps entered to reach it. */
+    char *view_file;                  /* NULL until the run names its root file */
+    char *trail_files[MAX_DEPTH], *trail_steps[MAX_DEPTH];
+    int depth;
+    char *root_name;                  /* the run's workflow name, for the breadcrumb */
+    Widget tabs, tab[VIEW_COUNT];
+    int view, back;                   /* the panel's view; how many jobs before the latest */
+    char *panel_key;                  /* file, step, view and job of the text shown */
+    char *panel_text;
+    XawTextPosition follow_top;       /* where following the end left the text, or -1 */
 } v;
 
 /* The program's own options are resources, as the toolkit's are. */
@@ -90,6 +107,8 @@ static struct {
 
 static void follow(const char *run);
 static void start_run(const char *text);
+static void enter_call(const char *step);
+static void go_up(void);
 static Json *new_step(const char *line);
 
 /* Utilities */
@@ -152,16 +171,22 @@ static void show_title(void) {
     char window[600];
     snprintf(window, sizeof window, "%s%s - asys", file, v.dirty ? " (unsaved)" : "");
     XtVaSetValues(v.top, XtNtitle, window, NULL);
-    char spec[600];
-    snprintf(spec, sizeof spec, "%s  ·  workflow/1  ·  %d steps  ·  %s%s", v.name ? v.name : "untitled",
-             v.step_count, v.run_mode ? "run" : file, v.dirty ? "  ·  unsaved" : "");
+    char spec[1200], where[700] = "";
+    for (int i = 0; v.run_mode && i < v.depth; i++) {
+        size_t used = strlen(where);
+        snprintf(where + used, sizeof where - used, "  \xe2\x80\xba  %s", i + 1 < v.depth ? v.trail_files[i + 1] : v.view_file);
+    }
+    snprintf(spec, sizeof spec, "%s%s  ·  workflow/1  ·  %d steps  ·  %s%s", v.name ? v.name : "untitled", where,
+             v.step_count, v.run_mode ? (v.depth ? "run  \xc2\xb7  Backspace goes up" : "run") : file, v.dirty ? "  ·  unsaved" : "");
     MapSetSpec(v.map, spec);
 }
 
 static void count_graph(const Json *graph) {
-    free(v.name);
-    const char *name = json_get_string(graph, "name");
-    v.name = name && *name ? strdup(name) : NULL;
+    if (!v.run_mode || !v.depth) {   /* a called file is shown under the run's own name */
+        free(v.name);
+        const char *name = json_get_string(graph, "name");
+        v.name = name && *name ? strdup(name) : NULL;
+    }
     v.step_count = 0;
     const Json *nodes = json_get(graph, "nodes");
     for (size_t i = 0; nodes && i < nodes->count; i++) {
@@ -382,40 +407,96 @@ static void inspected(const Json *reply, void *data) {
     show_rows();
 }
 
-/* Run mode: the step's jobs, results and log ends. */
-static void step_details(const Json *reply, void *data) {
-    (void)data;
-    if (!json_get_bool(reply, "ok")) { show_details(json_get_string(reply, "error")); return; }
+/* The text panes use the core fonts' Latin-1, and saved work is UTF-8: keep
+ * what Latin-1 has, give typography its ASCII form, and mark the rest. */
+static char *latin1(const char *utf8) {
     size_t size = 0;
     char *text = NULL;
     FILE *out = open_memstream(&text, &size);
-    const Json *state = json_get(reply, "state");
-    fprintf(out, "%s\nstate: %s", json_get_string(reply, "step"), json_get_string(state, "state"));
-    int visits = (int)json_get_number(state, "visits", 0);
-    if (visits > 1) fprintf(out, ", run %d times", visits);
-    fprintf(out, "\n");
-    const Json *jobs = json_get(reply, "jobs");
-    if (!jobs || !jobs->count) fprintf(out, "\nNo jobs.\n");
-    for (size_t i = 0; jobs && i < jobs->count; i++) {
-        const Json *job = json_at(jobs, i);
-        fprintf(out, "\njob %s  %s  %s", json_get_string(job, "id"), json_get_string(job, "type"), json_get_string(job, "status"));
-        if (json_get(job, "item") && json_get(job, "item")->type == JSON_NUMBER) fprintf(out, "  item %d", (int)json_get_number(job, "item", 0));
-        const char *elapsed = json_get_string(job, "elapsed");
-        if (elapsed) fprintf(out, "  %s", elapsed);
-        fprintf(out, "\n");
-        const Json *result = json_get(job, "result");
-        if (result && result->type != JSON_NULL) { char *r = json_write(result); fprintf(out, "result: %s\n", r); free(r); }
-        const char *streams[] = { "stdout", "stderr" };
-        for (int s = 0; s < 2; s++) {
-            const Json *lines = json_get(job, streams[s]);
-            if (!lines || !lines->count) continue;
-            fprintf(out, "%s:\n", streams[s]);
-            for (size_t k = 0; k < lines->count; k++) fprintf(out, "  %s\n", json_at(lines, k)->string);
-        }
+    for (const unsigned char *s = (const unsigned char *)utf8; *s; ) {
+        unsigned code;
+        int length = *s < 0x80 ? 1 : (*s & 0xe0) == 0xc0 ? 2 : (*s & 0xf0) == 0xe0 ? 3 : (*s & 0xf8) == 0xf0 ? 4 : 0;
+        if (!length) { fputc('?', out); s++; continue; }
+        code = length == 1 ? *s : *s & (0xff >> (length + 1));
+        int i = 1;
+        for (; i < length && (s[i] & 0xc0) == 0x80; i++) code = code << 6 | (s[i] & 0x3f);
+        if (i < length) { fputc('?', out); s += i; continue; }   /* a truncated sequence */
+        s += length;
+        if (code < 0x100) fputc((int)code, out);
+        else if (code == 0x2018 || code == 0x2019 || code == 0x2032) fputc('\'', out);
+        else if (code == 0x201c || code == 0x201d || code == 0x2033) fputc('"', out);
+        else if (code >= 0x2010 && code <= 0x2015) fputc('-', out);
+        else if (code == 0x2212) fputc('-', out);
+        else if (code == 0x2026) fputs("...", out);
+        else if (code == 0x2022) fputc('*', out);
+        else if (code == 0x2192) fputs("->", out);
+        else if (code == 0x2190) fputs("<-", out);
+        else if (code == 0x2264) fputs("<=", out);
+        else if (code == 0x2265) fputs(">=", out);
+        else if (code == 0x2260) fputs("!=", out);
+        else fputc('?', out);
     }
     fclose(out);
-    show_details(text);
+    return text;
+}
+
+/* Run mode's panel: the text of one view of one job. Logs and transcripts grow
+ * at the end; while the end is in sight it stays in sight, and a reader who
+ * has scrolled away keeps their place. */
+static void show_panel(const char *key, const char *text, int at_end) {
+    int same_view = v.panel_key && !strcmp(v.panel_key, key);
+    if (same_view && v.panel_text && !strcmp(v.panel_text, text)) return;
+    XawTextPosition top = XawTextTopPosition(v.details);
+    int following = !same_view ? at_end : v.follow_top >= 0 && top == v.follow_top;
+    XtVaSetValues(v.details, XtNstring, text, NULL);
+    if (following) {
+        XawTextSetInsertionPoint(v.details, (XawTextPosition)strlen(text));
+        v.follow_top = XawTextTopPosition(v.details);
+    } else {
+        if (same_view) XtVaSetValues(v.details, XtNdisplayPosition, top, NULL);
+        v.follow_top = -1;
+    }
+    free(v.panel_key); v.panel_key = strdup(key);
+    free(v.panel_text); v.panel_text = strdup(text);
+}
+
+static void panel_reply(const Json *reply, void *data) {
+    (void)data;
+    if (!json_get_bool(reply, "ok")) { show_details(json_get_string(reply, "error")); return; }
+    const char *step = json_get_string(reply, "step");
+    if (!step || !MapSelection(v.map) || strcmp(step, MapSelection(v.map))) return;   /* the selection moved on */
+    const Json *job = json_get(reply, "job");
+    int count = (int)json_get_number(reply, "count", 0), index = (int)json_get_number(reply, "index", 0);
+    if (count) v.back = count - index;   /* the service keeps it within the jobs there are */
+    char under[400];
+    if (job && job->type == JSON_OBJECT) {
+        const char *elapsed = json_get_string(job, "elapsed");
+        snprintf(under, sizeof under, "%s  \xb7  %s%s%s  \xb7  job %d of %d%s", json_get_string(job, "type"),
+                 json_get_string(job, "status"), elapsed ? "  \xb7  " : "", elapsed ? elapsed : "", index, count,
+                 count > 1 ? "  \xb7  [ ] older, newer" : "");
+    } else {
+        snprintf(under, sizeof under, "Step of this run  \xb7  no jobs yet");
+    }
+    XtVaSetValues(v.subheading, XtNlabel, under, NULL);
+    size_t size = 0;
+    char *text = NULL;
+    FILE *out = open_memstream(&text, &size);
+    const Json *lines = json_get(reply, "lines");
+    for (size_t i = 0; lines && i < lines->count; i++) fprintf(out, "%s\n", json_at(lines, i)->string ? json_at(lines, i)->string : "");
+    fclose(out);
+    char *key = format("%s|%s|%s|%s", json_get_string(reply, "file"), step, VIEWS[v.view],
+                       job && job->type == JSON_OBJECT ? json_get_string(job, "id") : "");
+    char *shown = latin1(text);
+    show_panel(key, shown, v.view == 1 || v.view == 2);
+    free(shown);
+    free(key);
     free(text);
+}
+
+static void set_view(int view) {
+    if (view < 0 || view >= VIEW_COUNT) return;
+    v.view = view;
+    if (v.tabs) XawToggleSetCurrent(v.tab[0], (XtPointer)(long)(view + 1));
 }
 
 /* The panel shows the selected step, or with nothing selected the workflow
@@ -435,10 +516,24 @@ static void inspect(void) {
     else snprintf(under, sizeof under, "%s  \xb7  select a step to edit it", v.file ? base_name(v.file) : "");
     XtVaSetValues(v.subheading, XtNlabel, under, NULL);
     show_issues();
-    if (v.run_mode && !selected) { show_details(v.run_summary); return; }
-    Json *r = request(v.run_mode ? "step" : "inspect");
+    if (v.run_mode && !selected) {
+        free(v.panel_key); v.panel_key = NULL;
+        free(v.panel_text); v.panel_text = NULL;
+        show_details(v.run_summary);
+        return;
+    }
+    if (v.run_mode) {
+        Json *r = request("panel");
+        json_set(r, "step", json_string(selected));
+        if (v.view_file) json_set(r, "file", json_string(v.view_file));
+        json_set(r, "view", json_string(VIEWS[v.view]));
+        json_set(r, "back", json_number(v.back));
+        service_send(r, panel_reply, NULL);
+        return;
+    }
+    Json *r = request("inspect");
     json_set(r, "step", json_string(selected ? selected : ""));
-    service_send(r, v.run_mode ? step_details : inspected, NULL);
+    service_send(r, inspected, NULL);
 }
 
 /* Commit an inspector field: keep the value's type where the text allows. */
@@ -799,7 +894,22 @@ static void command(const char *name) {
         if (v.dirty && !v.quit_armed) { v.quit_armed = 1; status("Unsaved changes: quit again to discard them, or save."); return; }
         exit(0);
     }
-    if (v.run_mode) { status("A run is read-only."); return; }
+    if (v.run_mode) {
+        for (int i = 0; i < VIEW_COUNT; i++)
+            if (!strncmp(name, "view ", 5) && !strcmp(name + 5, VIEWS[i])) { set_view(i); inspect(); return; }
+        if (!strcmp(name, "up")) { go_up(); return; }
+        if (!strcmp(name, "enter")) { enter_call(selected); return; }
+        if (!strcmp(name, "older job") || !strcmp(name, "newer job")) {
+            if (!selected) { status("Select a step first."); return; }
+            int older = !strcmp(name, "older job");
+            if (!older && !v.back) { status("This is the step's latest job."); return; }
+            v.back += older ? 1 : -1;
+            inspect();
+            return;
+        }
+        status("A run is read-only.");
+        return;
+    }
     if (!strcmp(name, "save")) { send_edit(request("save"), "Saved."); return; }
     if (!strcmp(name, "undo")) { if (v.can_undo) send_edit(request("undo"), "Undone."); else status("Nothing to undo."); return; }
     if (!strcmp(name, "redo")) { if (v.can_redo) send_edit(request("redo"), "Redone."); else status("Nothing to redo."); return; }
@@ -828,6 +938,7 @@ static void command(const char *name) {
 
 static void map_selected(Widget w, XtPointer client, XtPointer call) {
     (void)w; (void)client;
+    v.back = 0;
     free(v.selected);
     v.selected = call ? strdup((const char *)call) : NULL;
     inspect();
@@ -855,7 +966,8 @@ static void called_reply(const Json *reply, void *data) {
 
 static void map_activated(Widget w, XtPointer client, XtPointer call) {
     (void)w; (void)client;
-    if (v.run_mode || !v.file) return;
+    if (v.run_mode) { enter_call((const char *)call); return; }
+    if (!v.file) return;
     if (v.dirty) { status("Save before opening another file."); return; }
     Json *r = request("inspect");
     json_set(r, "step", json_string((const char *)call));
@@ -891,6 +1003,13 @@ static void match_chosen(Widget w, XtPointer client, XtPointer call) {
     mini_accept();
 }
 
+static void tab_chosen(Widget w, XtPointer client, XtPointer call) {
+    (void)w;
+    if (!call) return;                     /* the button just released */
+    v.view = (int)(long)client;
+    inspect();
+}
+
 static void menu_chosen(Widget w, XtPointer client, XtPointer call) {
     (void)w; (void)call;
     command((const char *)client);
@@ -903,9 +1022,13 @@ static void lost(const char *why) {
 static void poll_reply(const Json *reply, void *data) {
     (void)data;
     if (!json_get_bool(reply, "ok")) { failed(reply); return; }
+    const char *file = json_get_string(reply, "file");
+    if (!v.view_file && file) v.view_file = strdup(file);          /* the run's root file */
+    if (file && v.view_file && strcmp(file, v.view_file)) return;  /* sent before the view changed */
     const Json *graph = json_get(reply, "graph");
     if (graph) { count_graph(graph); MapSetGraph(v.map, graph); }
     MapSetStates(v.map, json_get(reply, "states"));
+    if (!v.root_name && v.name) v.root_name = strdup(v.name);
     const Json *run = json_get(reply, "run");
     const char *state = json_get_string(run, "status"), *error = json_get_string(run, "error");
     status("This run is %s%s%s", state ? state : "unknown", error && *error ? ": " : "", error ? error : "");
@@ -931,8 +1054,60 @@ static void poll_reply(const Json *reply, void *data) {
 
 static void poll(XtPointer client, XtIntervalId *id) {
     (void)client; (void)id;
-    if (!service_pending()) service_send(request("poll"), poll_reply, NULL);
+    if (!service_pending()) {
+        Json *r = request("poll");
+        if (v.view_file) json_set(r, "file", json_string(v.view_file));
+        service_send(r, poll_reply, NULL);
+    }
     XtAppAddTimeOut(v.app, 1500, poll, NULL);
+}
+
+/* Entering a call step shows the file it calls in its place; Backspace goes
+ * back up to the step that called it. */
+static void shown_reply(const Json *reply, void *data) {
+    char *select = data;
+    if (!json_get_bool(reply, "ok")) { failed(reply); free(select); return; }
+    free(v.view_file);
+    v.view_file = strdup(json_get_string(reply, "file"));
+    v.back = 0;
+    count_graph(json_get(reply, "graph"));
+    MapSetGraph(v.map, json_get(reply, "graph"));
+    MapSetStates(v.map, json_get(reply, "states"));
+    MapSelect(v.map, select);
+    free(v.selected);
+    v.selected = select;
+    MapZoom(v.map, 0);
+    show_title();
+    inspect();
+}
+
+static void enter_reply(const Json *reply, void *data) {
+    char *step = data;
+    if (!json_get_bool(reply, "ok")) { failed(reply); free(step); return; }
+    if (v.depth == MAX_DEPTH) { status("Calls are nested too deep to follow further."); free(step); return; }
+    v.trail_files[v.depth] = strdup(v.view_file);
+    v.trail_steps[v.depth] = step;
+    v.depth++;
+    status("Inside %s; Backspace returns to %s.", json_get_string(reply, "file"), step);
+    shown_reply(reply, NULL);
+}
+
+static void enter_call(const char *step) {
+    if (!step) { status("Select a call step first."); return; }
+    Json *r = request("enter");   /* the service knows which steps call a file */
+    json_set(r, "step", json_string(step));
+    if (v.view_file) json_set(r, "file", json_string(v.view_file));
+    service_send(r, enter_reply, strdup(step));
+}
+
+static void go_up(void) {
+    if (!v.depth) { status("This is the run's own file."); return; }
+    v.depth--;
+    Json *r = request("view");
+    json_set(r, "file", json_string(v.trail_files[v.depth]));
+    service_send(r, shown_reply, v.trail_steps[v.depth]);   /* select the call step we came from */
+    free(v.trail_files[v.depth]);
+    v.trail_files[v.depth] = v.trail_steps[v.depth] = NULL;
 }
 
 /* Actions bound to keys */
@@ -1092,6 +1267,17 @@ static char map_keys[] =
     "<Key>1: command(\"full size\")\n"
     "<Key>Return: focus-inspector()\n";
 
+/* Following a run: views of the selected step's job, its jobs, and called files. */
+static char run_keys[] =
+    "<Key>s: command(\"view summary\")\n"
+    "<Key>t: command(\"view transcript\")\n"
+    "<Key>l: command(\"view logs\")\n"
+    "<Key>r: command(\"view result\")\n"
+    "<Key>bracketleft: command(\"older job\")\n"
+    "<Key>bracketright: command(\"newer job\")\n"
+    "<Key>Return: command(enter)\n"
+    "<Key>BackSpace: command(up)\n";
+
 static char entry_keys[] =
     "<Key>Return: mini-accept()\n"
     "<Key>Escape: mini-cancel()\n"
@@ -1179,7 +1365,15 @@ int main(int argc, char **argv) {
     if (!v.run_mode) menu(v.bar, "edit", "Edit", edit_entries);
     menu(v.bar, "view", "View", view_entries);
     static const char *const run_entries[][2] = { { "Start run...      Ctrl+R", "start run" },
-                                                  { "Follow run...", "follow run" }, { NULL, NULL } };
+                                                  { "Follow run...", "follow run" }, { "", "" },
+                                                  { "Summary                s", "view summary" },
+                                                  { "Transcript             t", "view transcript" },
+                                                  { "Logs                   l", "view logs" },
+                                                  { "Result                 r", "view result" },
+                                                  { "Older job              [", "older job" },
+                                                  { "Newer job              ]", "newer job" }, { "", "" },
+                                                  { "Enter call        Return", "enter" },
+                                                  { "Up             Backspace", "up" }, { NULL, NULL } };
     menu(v.bar, "run", "Run", run_entries);
 
     /* The map above, at the window's full width; the panel a strip beneath it,
@@ -1189,12 +1383,14 @@ int main(int argc, char **argv) {
                                       XtNshowGrip, False, NULL);
     v.map = XtVaCreateManagedWidget("map", mapWidgetClass, v.split, XtNwidth, 1280, XtNheight, 600, XtNmin, 160, NULL);
     XtOverrideTranslations(v.map, XtParseTranslationTable(map_keys));
+    if (v.run_mode) XtOverrideTranslations(v.map, XtParseTranslationTable(run_keys));
     XtAddCallback(v.map, XtNselectCallback, map_selected, NULL);
     XtAddCallback(v.map, XtNactivateCallback, map_activated, NULL);
     XtAddCallback(v.map, XtNconnectCallback, map_connected, NULL);
 
     v.side = XtVaCreateManagedWidget("side", panedWidgetClass, v.split, XtNorientation, XtorientHorizontal,
-                                     XtNpreferredPaneSize, 250, XtNmin, 120, XtNskipAdjust, True, XtNinternalBorderWidth, 1, NULL);
+                                     XtNpreferredPaneSize, v.run_mode ? 420 : 250, XtNmin, 120, XtNskipAdjust, True,
+                                     XtNinternalBorderWidth, 1, NULL);   /* following a run, the panel is what is read */
     v.about = XtVaCreateManagedWidget("about", panedWidgetClass, v.side, XtNorientation, XtorientVertical,
                                       XtNwidth, 1280, XtNmin, 300, XtNinternalBorderWidth, 0, NULL);
     v.notes = XtVaCreateWidget("notes", panedWidgetClass, v.side, XtNorientation, XtorientVertical,
@@ -1216,8 +1412,19 @@ int main(int argc, char **argv) {
                                        XtNdefaultColumns, 1, XtNforceColumns, True, XtNverticalList, True, NULL);
     XtAddCallback(v.issues, XtNcallback, issue_chosen, NULL);
     if (v.run_mode) {
+        v.tabs = XtVaCreateManagedWidget("tabs", boxWidgetClass, v.about, XtNorientation, XtorientHorizontal,
+                                         XtNshowGrip, False, XtNskipAdjust, True, NULL);
+        for (int i = 0; i < VIEW_COUNT; i++) {
+            char label[40];
+            snprintf(label, sizeof label, "%s  %c", VIEW_LABELS[i], VIEWS[i][0]);
+            v.tab[i] = XtVaCreateManagedWidget(VIEWS[i], toggleWidgetClass, v.tabs, XtNlabel, label,
+                                               XtNradioGroup, i ? v.tab[0] : NULL, XtNradioData, (XtPointer)(long)(i + 1),
+                                               XtNstate, i == v.view, NULL);
+            XtAddCallback(v.tab[i], XtNcallback, tab_chosen, (XtPointer)(long)i);
+        }
+        v.follow_top = -1;
         v.details = XtVaCreateManagedWidget("details", asciiTextWidgetClass, v.about, XtNscrollVertical, XawtextScrollWhenNeeded,
-                                            XtNwrap, XawtextWrapLine, XtNeditType, XawtextRead, XtNstring, "",
+                                            XtNwrap, XawtextWrapWord, XtNeditType, XawtextRead, XtNstring, "",
                                             XtNdisplayCaret, False, XtNpreferredPaneSize, 400, XtNmin, 60, XtNleftMargin, 14, XtNtopMargin, 6, NULL);
     } else {
         v.fields_view = XtVaCreateManagedWidget("fieldsView", viewportWidgetClass, v.about, XtNallowVert, True, XtNheight, 160,

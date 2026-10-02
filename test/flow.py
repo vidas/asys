@@ -313,6 +313,105 @@ class RunViewTests(Fixture):
         self.assertEqual(handle(session, {'op': 'step', 'step': 'brief'})['jobs'], [])
 
 
+class RunPanelTests(Fixture):
+    """A viewer enters called files and reads one job of a step at a time."""
+    def setUp(self):
+        super().setUp()
+        self.run = self.root / 'runs/fedcba9876543210fedcba9876543210'
+        (self.run / 'workflow').mkdir(parents=True)
+        (self.run / 'workflow/workflow.json').write_text(json.dumps(flow.resolved(flow.load_all(self.write(WORKFLOW)))))
+        (self.run / 'run.json').write_text(json.dumps({'id': self.run.name, 'name': 'Delivery', 'status': 'running',
+                                                       'environment_directory': str(self.environment)}))
+        # The root's step "review" calls review-loop.yaml, whose own step is also "review".
+        # Job events name only a frame, which the called file's step events place in that file.
+        events = [
+            (1, 'step.started', 'review', {'frame': 'f1', 'file': 'workflow.yaml', 'kind': 'call', 'visit': 1}),
+            (2, 'step.started', 'review', {'frame': 'f9', 'file': 'review-loop.yaml', 'kind': 'run', 'visit': 1}),
+            (3, 'job.created', 'review', {'frame': 'f9', 'jobId': 'first', 'type': 'single', 'executionId': 'f9:review:1'}),
+            (4, 'step.completed', 'review', {'frame': 'f1', 'file': 'workflow.yaml'}),
+            (5, 'job.failed', 'review', {'executionId': 'f9:review:1', 'jobId': 'first'}),
+            (6, 'step.failed', 'review', {'frame': 'f9', 'file': 'review-loop.yaml'}),
+        ]
+        (self.run / 'events.jsonl').write_text(''.join(json.dumps({'sequence': sequence, 'type': kind, 'activityId': step,
+                                                                   'time': 't', 'data': data}) + '\n'
+                                                       for sequence, kind, step, data in events))
+        self.job('first', 'done', '2026-10-01T10:00:00Z', result={'final': 'Needs evidence.', 'exception': None,
+                 'approved': False, 'reason': 'No measurements.'}, stdout=['{"type":"agent.message_started"}'],
+                 transcript=[('user', 'Review the report.'), ('assistant', 'It lacks measurements.')])
+        self.job('second', 'failed', '2026-10-01T11:00:00Z', stderr=['Traceback', 'RuntimeError: model unavailable'],
+                 error='worker exited with status 1', exit_code=1)
+
+    def job(self, identity, status, submitted, *, result=None, stdout=(), stderr=(), transcript=(), **state):
+        queue = self.run / 'runtime/environments/fixture/jobs' / identity
+        queue.mkdir(parents=True)
+        (queue / 'request.json').write_text(json.dumps({'id': identity, 'type': 'single',
+            'directory': f'../../../jobs/{identity}', 'workspace': '../../../workspace',
+            'metadata': {'name': 'review', 'activity_id': 'review', 'file': 'review-loop.yaml'}}))
+        (queue / 'state.json').write_text(json.dumps({'id': identity, 'type': 'single', 'status': status,
+                                                      'submitted_at': submitted, **state}))
+        execution = self.run / 'jobs' / identity
+        execution.mkdir(parents=True)
+        (execution / 'stdout.log').write_text(''.join(line + '\n' for line in stdout))
+        (execution / 'stderr.log').write_text(''.join(line + '\n' for line in stderr))
+        if result is not None:
+            (execution / 'result.json').write_text(json.dumps(result))
+        if transcript:
+            entries = [{'type': 'message', 'id': str(index), 'parentId': str(index - 1) if index else None,
+                        'message': {'role': role, 'content': [{'type': 'text', 'text': text}]}}
+                       for index, (role, text) in enumerate(transcript)]
+            (execution / 'agent.json').write_text(json.dumps({'agent': {'session': {
+                'entries': entries, 'leafId': str(len(entries) - 1)}}}))
+
+    def test_each_file_has_its_own_steps_and_a_call_enters_its_file(self):
+        from asys.flow_service import Session, handle
+        session = Session()
+        opened = handle(session, {'op': 'open', 'run': str(self.run)})
+        # The called file's job failure is its own: the root's step of the same name stays done.
+        self.assertEqual(opened['states'], {'review': {'state': 'done', 'visits': 1, 'time': 't'}})
+        entered = handle(session, {'op': 'enter', 'step': 'review'})
+        self.assertEqual(entered['file'], 'review-loop.yaml')
+        self.assertEqual({node['id'] for node in entered['graph']['nodes']}, {'review', 'done'})
+        self.assertEqual(entered['states'], {'review': {'state': 'failed', 'visits': 1, 'time': 't'}})
+        self.assertEqual(handle(session, {'op': 'view'})['file'], 'workflow.yaml')
+        self.assertEqual(handle(session, {'op': 'poll', 'file': 'review-loop.yaml'})['states']['review']['state'], 'failed')
+        self.assertEqual([job['id'] for job in handle(session, {'op': 'step', 'step': 'review', 'file': 'review-loop.yaml'})['jobs']],
+                         ['first', 'second'])
+        self.assertEqual(handle(session, {'op': 'step', 'step': 'review'})['jobs'], [])
+        with self.assertRaisesRegex(ValueError, 'does not call another file'):
+            handle(session, {'op': 'enter', 'step': 'brief'})
+        with self.assertRaisesRegex(ValueError, 'not a file of this run'):
+            handle(session, {'op': 'view', 'file': '../outside.yaml'})
+
+    def test_the_panel_shows_one_job_in_each_view(self):
+        from asys.flow_service import Session, handle
+        session = Session()
+        handle(session, {'op': 'open', 'run': str(self.run)})
+        panel = lambda **request: handle(session, {'op': 'panel', 'step': 'review', 'file': 'review-loop.yaml', **request})
+        latest = panel()
+        self.assertEqual((latest['index'], latest['count'], latest['job']['id']), (2, 2, 'second'))
+        summary = '\n'.join(latest['lines'])
+        self.assertIn('>   2  single  failed', summary)
+        self.assertIn('Error (failed)', summary)
+        self.assertIn('worker exited with status 1', summary)
+        self.assertIn('RuntimeError: model unavailable', summary)
+        older = panel(view='result', back=1)
+        self.assertEqual((older['index'], older['job']['id']), (1, 'first'))
+        self.assertEqual(older['lines'], ['Final', 'Needs evidence.', '', 'Approved:', '  false', 'Reason:', '  No measurements.'])
+        self.assertEqual(panel(view='result', back=99)['index'], 1)       # clamped to the oldest job
+        self.assertIn('Exit code: 1', panel(view='result')['lines'])
+        transcript = panel(view='transcript', back=1)['lines']
+        self.assertIn('It lacks measurements.', transcript)
+        self.assertEqual(transcript[0], 'Transcript of single')
+        logs = panel(view='logs')['lines']
+        self.assertEqual(logs[:2], ['stdout', '(empty)'])
+        self.assertEqual(logs[-2:], ['Traceback', 'RuntimeError: model unavailable'])
+        waiting = handle(session, {'op': 'panel', 'step': 'brief'})
+        self.assertEqual((waiting['count'], waiting['job']), (0, None))
+        self.assertIn('No jobs yet.', waiting['lines'])
+        with self.assertRaisesRegex(ValueError, 'view must be one of'):
+            panel(view='everything')
+
+
 class ConvertTests(unittest.TestCase):
     def convert(self, relative):
         from asys.flow_convert import convert

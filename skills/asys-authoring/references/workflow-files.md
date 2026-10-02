@@ -87,7 +87,8 @@ form allows; `asys workflow check` reports it otherwise.
 `$ASYS_ENVIRONMENT_DIR`, as for `asys workflow check`) shows the workflow on
 X11, edits it while keeping comments and order, and starts runs of the saved
 file (Ctrl+R), each in a window that follows it live; `asys-flow-view -run
-RUN` follows any run. See `asys-flow-view(1)`.
+RUN` follows any run, entering called files from their call steps and showing
+each job's summary, transcript, logs and result. See `asys-flow-view(1)`.
 
 ## From BPMN
 

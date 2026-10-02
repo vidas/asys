@@ -29,8 +29,30 @@ With
 .BR \-run ,
 the program follows a run instead: steps not yet reached are open, finished
 ones filled, running ones carry a cursor beneath them, and a failure says so.
-Selecting a step shows its jobs, results and the end of their logs. A run is
-read only.
+A call step leads into the file it calls: Return or a double click shows that
+file's map, with its own steps and states, and Backspace returns to the step
+that called it; the spec line above the map names the files entered. A repeat
+or group holding a single call leads into its file too.
+.PP
+Selecting a step shows one of its jobs, the latest unless
+.B [
+and
+.B ]
+choose an older or newer one, in one of four views:
+.I Summary
+lists the step's jobs and puts a failed job's error, exit code and last error
+output first;
+.I Transcript
+is the worker's conversation as
+.B asys top
+shows it, Senate rounds and goal attempts included, with the reply being
+written;
+.I Logs
+are its standard output and error;
+.I Result
+is the saved result as readable fields. Transcripts and logs stay at their end
+while it is in sight, so a running job can be read as it works; scrolling up
+keeps the place. A run is read only.
 .PP
 The program is a client of
 .BR "asys workflow serve" ,
@@ -103,7 +125,25 @@ or
 .B r c e
 Rename the selected step, set where it continues, set where it continues on
 error.
+.PP
+Following a run:
+.TP 12
+.B "s t l r"
+The selected job's summary, transcript, logs or result; the buttons above the
+text do the same.
 .TP
+.B "[ ]"
+An older or a newer job of the step: each visit of a repeat, each round of a
+loop.
+.TP
+.B Return
+Enter the file the selected call step calls.
+.TP
+.B Backspace
+Return to the file that called this one.
+.PP
+Editing a file:
+.TP 12
 .B Ctrl-R
 Start a run of the saved file: the request is asked on the bottom line, and
 the run opens in a window of its own. The Run menu also follows any run.
@@ -203,4 +243,6 @@ Personal resources, loaded with
 .B "asys workflow \-\-help"
 for checking and converting workflow files.
 .SH BUGS
-Labels outside the map use the core X fonts, which are Latin-1.
+Labels outside the map use the core X fonts, which are Latin-1. A run's
+text is shown in Latin-1: typographic quotes, dashes and arrows take their
+ASCII form, and other characters outside Latin-1 appear as a question mark.

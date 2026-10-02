@@ -23,8 +23,12 @@ Running the loaded file (it must be saved; asys-run reads it from disk):
 
 Following a run (read-only; the graph is the run's saved document):
   {"op": "open", "run": DIRECTORY|ID, "root": STATE?}   graph, run status, step states
-  {"op": "poll"}                                         run status, step states
-  {"op": "step", "step": PATH}                           the step's jobs, results and logs
+  {"op": "poll", "file": KEY?}                           run status, step states of one file
+  {"op": "step", "step": PATH, "file": KEY?}             the step's jobs, results and logs
+  {"op": "view", "file": KEY?}                           one file of the run: graph and states
+  {"op": "enter", "step": PATH, "file": KEY?}            the file a call step calls: its graph and states
+  {"op": "panel", "step": PATH, "file": KEY?, "view": summary|transcript|logs|result, "back": N?}
+                                                         one job of the step, N before its latest, as lines
 """
 import io
 import json
@@ -334,10 +338,19 @@ def handle(session, request):
     if op == 'open':
         session.run = RunView(request['run'], request.get('root'))
         return {'graph': session.run.graph(), **session.run.poll()}
-    if op in {'poll', 'step'}:
+    if op in {'poll', 'step', 'view', 'enter', 'panel'}:
         if session.run is None:
             raise EditError('open a run first')
-        return session.run.poll() if op == 'poll' else session.run.step(request['step'])
+        run, file = session.run, request.get('file')
+        if op == 'poll':
+            return run.poll(file)
+        if op == 'view':
+            return run.view(file)
+        if op == 'enter':
+            return run.enter(request['step'], file)
+        if op == 'panel':
+            return run.panel(request['step'], file, request.get('view', 'summary'), request.get('back', 0))
+        return run.step(request['step'], file)
     if op == 'create':
         # A new file: one step, which ends, ready to grow.
         target = Path(request['file']).expanduser()

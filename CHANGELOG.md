@@ -14,6 +14,14 @@
 - `asys-flow-view` views and edits workflow files on X11, in the style guide's
   graphic language, and follows runs live. It builds where the Xaw, Xft and
   XRender development files are installed.
+- `asys-flow-view -run` follows a run into its called files: Return on a call
+  step shows the called file's map and states, and Backspace returns. A
+  step's panel shows one of its jobs (`[` and `]` choose) as a summary with
+  the error first, the transcript as `asys top` renders it, the logs, or the
+  result as readable fields, following the end while it is in sight.
+  `asys workflow serve` gains `view`, `enter` and `panel`, and `poll` and
+  `step` take a file. Job events no longer give steps of called files a state
+  in the calling file.
 - `asys dashboard --allow-host HOST[:PORT]` also answers requests addressed to
   that name, so a dashboard can be reached through `ssh -R` or a proxy that
   keeps the browser's host; other names are still refused.

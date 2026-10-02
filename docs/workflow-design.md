@@ -369,7 +369,9 @@ component never cancels work; it only stops waiting for it.
 - `asys workflow serve` reads and writes JSON requests on stdin and stdout:
   load a file, lay it out as nodes and edges in the style guide's grammar,
   apply an edit (add, remove, connect, change a field), save, and stream a run's
-  step states. Edits go through `ruamel.yaml`, so comments and order survive.
+  step states, file by file, with one job of a step at a time as a summary,
+  transcript, logs or result. Edits go through `ruamel.yaml`, so comments and
+  order survive.
 
 The desktop viewer and editor, `asys-flow-view`, is a C program on the standard
 X11 toolkit: Xt and Athena widgets for windows, panes, lists, text fields and
@@ -393,8 +395,8 @@ Old widgets, current interaction practice:
   and it is never empty: the selected step's ID and fields across its width,
   and beneath them its problems, taking room only when there are some; with
   nothing selected, the workflow's own fields and every problem, each leading
-  to its step; in a run, the run's progress or the step's jobs, results and
-  logs; the YAML (y) opens a column beside them; Tab hides the strip; the wheel
+  to its step; in a run, the run's progress or one job of the step in one of
+  four views; the YAML (y) opens a column beside them; Tab hides the strip; the wheel
   scrolls whatever it is over;
 - the menu bar is the standard Athena one, MenuButtons and SimpleMenus listing
   each command's key; messages and prompts share the line at the bottom;
@@ -408,8 +410,11 @@ Old widgets, current interaction practice:
   in the panel;
 - open a run instead of a file to follow it live: each step shows its state by
   form, never by colour (open until it runs, filled once done, the verde cursor
-  beneath it while it runs, and FAILED in words), and selecting it shows its
-  jobs, results and the end of their logs;
+  beneath it while it runs, and FAILED in words); a call step leads into the
+  file it calls (Return), whose map shows its own steps' states, and Backspace
+  returns; selecting a step shows one of its jobs (`[` and `]` older and newer)
+  as a summary with the error first, its transcript, its logs or its result
+  (`s t l r`), following the end while it is in sight;
 - the window remembers its size and zoom; resources (`Xdefaults`) can set the
   fonts and each colour of the palette (`AsysFlowView*map.verde`, ...).
 
@@ -422,6 +427,8 @@ a add after (NAME KIND ARG)   r rename   c continue at   e on error   Delete rem
 Ctrl+R run the saved file in a new window   File New, Open   y YAML, edited in place
 u, Ctrl+Z undo   Ctrl+Y redo   Ctrl+S save   + - zoom   0 fit   1 full size
 Tab panel   y YAML   q quit
+following a run: s t l r summary, transcript, logs, result   [ ] older, newer job
+                 Return enter a call   Backspace back to its caller
 ```
 
 A double click on a `call` step opens the file it calls.
