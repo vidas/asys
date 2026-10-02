@@ -1,6 +1,6 @@
 # Release notes
 
-## Unreleased
+## 0.2.2
 
 - Write workflows as YAML files (`asys: workflow/1`) whose steps name the
   environment's worker types and hold no code: run, parallel and join, group,
