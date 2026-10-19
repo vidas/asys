@@ -1,5 +1,11 @@
 # Release notes
 
+## Unreleased
+
+- Update Pi to 1.3.0 for current models and providers, including Claude
+  Haiku 5.5. The inference format becomes `pi-ai@1.3.0`: update shared
+  inference and upgrade active runs together.
+
 ## 0.2.2
 
 - Write workflows as YAML files (`asys: workflow/1`) whose steps name the

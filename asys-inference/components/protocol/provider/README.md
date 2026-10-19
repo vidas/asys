@@ -43,7 +43,7 @@ these strings. Relays forward them unchanged.
 The call frame's context is Pi's normalized transcript: the system prompt and
 tool declarations travel as `system` messages, not as context fields. Cyclo's Pi
 format identifier names the pinned `pi-ai` release, for example
-`pi-ai@0.99.1`. Changing the pin changes the identifier, so every Pi endpoint in
+`pi-ai@1.3.0`. Changing the pin changes the identifier, so every Pi endpoint in
 a chain must move to the new release together.
 
 The package exports the public-ID helpers plus `PI_INFERENCE_FORMAT`,

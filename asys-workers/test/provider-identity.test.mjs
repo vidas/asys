@@ -9,8 +9,8 @@ test('Pi sees public identities while Provider receives native history, includin
     { type: 'text', text: 'Working', textSignature: 'signed-text' },
     { type: 'toolCall', id: 'call|native', name: 'bash', arguments: { command: 'true' }, thoughtSignature: 'signed-call' },
   ], 'toolUse'), api: 'openai-codex-responses', provider: 'openai-codex', model: 'backend-model',
-  responseId: 'native-response', rawStopReason: 'completed' };
-  const nativeError = { ...assistant([], 'error'), api: 'anthropic-messages', provider: 'anthropic', model: 'other-backend', errorMessage: 'context length exceeded' };
+  responseId: 'native-response', rawStopReason: 'completed', durationMs: 1200 };
+  const nativeError = { ...assistant([], 'error'), api: 'anthropic-messages', provider: 'anthropic', model: 'other-backend', errorMessage: 'context length exceeded', durationMs: 300 };
   const routes = [
     { publicId: 'account/alias', model: { provider: 'account', id: 'alias', api: 'cyclo-pi' } },
     { publicId: 'pool/choice', model: { provider: 'pool', id: 'choice', api: 'cyclo-pi' } },
