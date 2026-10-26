@@ -1,5 +1,5 @@
 import { getCurrentSystemPrompt, getCurrentTools } from '@earendil-works/pi-ai';
-export const model = { id: 'fixture/model', displayName: 'Test model', inferenceFormat: 'pi-ai@1.3.0',
+export const model = { id: 'fixture/model', displayName: 'Test model', inferenceFormat: 'pi-ai@1.4.0',
   contextWindowTokens: 100000n, maxOutputTokens: 8000n,
   capabilities: { inputModalities: [1], outputModalities: [1], functionTools: true, reasoning: false } };
 // Provider payloads carry Pi's normalized transcript: the system prompt and

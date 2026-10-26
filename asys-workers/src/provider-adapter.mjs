@@ -259,13 +259,17 @@ function abortableSleep(delayMs, signal) {
 }
 
 // These values control the local process or the credential boundary; they are
-// not inference data and therefore never enter the payload. All other JSON
-// options, including provider-specific options unknown to Cyclo, pass through.
+// not inference data and therefore never enter the payload. The client
+// identity selects outgoing headers, which belong to the gateway. All other
+// JSON options, including provider-specific options unknown to Cyclo, pass
+// through.
 function inferenceOptions(options) {
   const {
     signal: _signal,
+    telemetry: _telemetry,
     apiKey: _apiKey,
     headers: _headers,
+    identity: _identity,
     env: _env,
     client: _client,
     onPayload: _onPayload,

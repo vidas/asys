@@ -5,6 +5,10 @@
 - Update Pi to 1.3.0 for current models and providers, including Claude
   Haiku 5.5. The inference format becomes `pi-ai@1.3.0`: update shared
   inference and upgrade active runs together.
+- Update Pi to 1.4.0. The inference format becomes `pi-ai@1.4.0`: update shared
+  inference and upgrade active runs together. Workers disable Pi's install
+  telemetry, and neither workers nor the gateway forward Pi's client identity,
+  so provider requests carry no attribution to pi.
 
 ## 0.2.2
 

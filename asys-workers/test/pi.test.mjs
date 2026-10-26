@@ -454,7 +454,7 @@ for (const partial of [false, true]) {
   });
 }
 
-test('native timeout options never enter the Provider payload or RPC options', async () => {
+test('native timeout options and the client identity never enter the Provider payload or RPC options', async () => {
   const route = groupModels([model]).get('fixture')[0];
   let frame;
   const provider = { async *infer(request, options) {
@@ -463,9 +463,10 @@ test('native timeout options never enter the Provider payload or RPC options', a
     yield { payload: JSON.stringify({ type: 'done', reason: 'stop', message: assistant([{ type: 'text', text: JSON.stringify({ final: 'ok', exception: null }) }]) }) };
   } };
   const result = await streamProvider(provider, model.id, route.model, { messages: [] },
-    { timeoutMs: 1000, temperature: 0.2 }).result();
+    { timeoutMs: 1000, temperature: 0.2, identity: { userAgent: { custom: 'worker' }, attribution: null } }).result();
   assert.equal(result.stopReason, 'stop');
   assert.equal(frame.options.timeoutMs, undefined);
+  assert.equal(frame.options.identity, undefined);
   assert.equal(frame.options.temperature, 0.2);
 });
 

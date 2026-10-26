@@ -41,7 +41,9 @@ export async function runAgent({ config, job, signal, provider, workspace: cwd, 
     },
   });
   // streamProvider owns transport recovery for turns and compaction alike.
-  const settingsManager = SettingsManager.inMemory({ compaction: { enabled: true }, retry: { enabled: false } });
+  // Install telemetry would attribute every request to pi.
+  const settingsManager = SettingsManager.inMemory({ compaction: { enabled: true }, retry: { enabled: false },
+    enableInstallTelemetry: false });
   const resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager,
     noSkills: true, noExtensions: true, noContextFiles: true, noPromptTemplates: true, noThemes: true,
     additionalSkillPaths: definition.skills,

@@ -6,7 +6,7 @@ import { getCurrentTools } from '@earendil-works/pi-ai';
 import { heartbeat } from '../asys-runtime/javascript/health.mjs';
 
 const models = ['worker'].map(name => ({ id: `fixture/${name}`, displayName: name,
-  inferenceFormat: 'pi-ai@1.3.0', contextWindowTokens: 100000n, maxOutputTokens: 8000n,
+  inferenceFormat: 'pi-ai@1.4.0', contextWindowTokens: 100000n, maxOutputTokens: 8000n,
   capabilities: { inputModalities: [1], outputModalities: [1], functionTools: true } }));
 const tool = (id, name, args) => ({ type: 'toolCall', id, name, arguments: args });
 function answer(content) {

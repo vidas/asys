@@ -46,6 +46,8 @@ test("decodes only the Pi call frame and preserves every native event", async ()
       futureOption: { untouched: true },
       apiKey: "hostile-key",
       headers: { authorization: "hostile" },
+      identity: { userAgent: { custom: "hostile" }, attribution: { name: "hostile", url: "https://hostile.example" } },
+      telemetry: { hostile: true },
       env: { SECRET: "hostile" },
       transport: "websocket",
       timeoutMs: 999_999,
@@ -68,6 +70,8 @@ test("decodes only the Pi call frame and preserves every native event", async ()
   assert.equal(invocation.options.apiKey, "gateway-key");
   assert.equal(invocation.options.maxRetries, 0);
   assert.equal(invocation.options.headers, undefined);
+  assert.equal(invocation.options.identity, undefined);
+  assert.equal(invocation.options.telemetry, undefined);
   assert.equal(invocation.options.env, undefined);
   assert.equal(invocation.options.transport, undefined);
   assert.equal(invocation.options.timeoutMs, undefined);

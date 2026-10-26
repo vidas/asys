@@ -23,7 +23,7 @@ const MODEL_ID_CASES = JSON.parse(await readFile(
 ));
 
 test("identifies the pinned Pi payload ABI", () => {
-  assert.equal(PI_INFERENCE_FORMAT, "pi-ai@1.3.0");
+  assert.equal(PI_INFERENCE_FORMAT, "pi-ai@1.4.0");
 });
 
 test("defines one bounded PROVIDER/MODEL public-ID contract", () => {

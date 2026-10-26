@@ -227,18 +227,20 @@ function piCallFrame(payload) {
   return { context: frame.context, options: frame.options ?? {} };
 }
 
-// Credentials, arbitrary headers/environment, callbacks, client objects, and
-// native transport/retry/timeout controls belong to the gateway process. They
-// cannot be selected through the data plane. Every other JSON option is
-// forwarded without a Cyclo allowlist.
+// Credentials, arbitrary headers/environment, the client identity (User-Agent
+// and attribution headers), callbacks, client objects, and native
+// transport/retry/timeout controls belong to the gateway process. They cannot
+// be selected through the data plane. Every other JSON option is forwarded
+// without a Cyclo allowlist.
 function gatewayOptions(options, signal, api, onResponse, transformHeaders) {
   const {
     apiKey: _apiKey,
     signal: _signal,
     headers: _headers,
+    identity: _identity,
     env: _env,
     fetch: _fetch,
-    telemetryContext: _telemetryContext,
+    telemetry: _telemetry,
     client: _client,
     onPayload: _onPayload,
     onResponse: _onResponse,
